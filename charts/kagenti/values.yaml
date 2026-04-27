@@ -247,7 +247,7 @@ kagenti-operator-chart:
   # Pin sidecar image tags injected by the AuthBridge webhook.
   defaults:
     images:
-      envoyProxy: ghcr.io/kagenti/kagenti-extensions/authbridge-envoy:v0.5.0-alpha.5
+      envoyProxy: authbridge-unified:latest
       authbridgeLight: ghcr.io/kagenti/kagenti-extensions/authbridge-light:v0.5.0-alpha.5
       proxyInit: ghcr.io/kagenti/kagenti-extensions/proxy-init:v0.5.0-alpha.5
       spiffeHelper: ghcr.io/kagenti/kagenti-extensions/spiffe-helper:v0.5.0-alpha.5
