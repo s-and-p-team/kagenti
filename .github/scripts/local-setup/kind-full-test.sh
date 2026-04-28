@@ -287,6 +287,33 @@ if [ "${KAGENTI_DEP_BUILDS:-}" != "[]" ] && [ "$RUN_INSTALL" = "true" ]; then
 fi
 
 # ============================================================================
+# PHASE 2c: Load local bare-name sidecar images into Kind
+# Some sidecar images (e.g., authbridge-unified) are built locally and
+# referenced by bare image names that Kind cannot pull from a public registry.
+# Podman stores them with a localhost/ prefix; containerd resolves bare names
+# to docker.io/library/. We load and re-tag so both references are available.
+# ============================================================================
+if [ "$RUN_INSTALL" = "true" ] && [ "${IS_OPENSHIFT:-false}" != "true" ]; then
+    CLUSTER_NAME="${KIND_CLUSTER_NAME:-kagenti}"
+    KIND_NODE="${CLUSTER_NAME}-control-plane"
+    BARE_SIDECAR_IMAGES=("authbridge-unified")
+    for img in "${BARE_SIDECAR_IMAGES[@]}"; do
+        if docker images "localhost/${img}:latest" --format '{{.ID}}' 2>/dev/null | grep -q .; then
+            log_step "Loading local ${img}:latest into Kind..."
+            docker tag "localhost/${img}:latest" "${img}:latest" 2>/dev/null || true
+            kind load docker-image "${img}:latest" --name "${CLUSTER_NAME}" 2>/dev/null || true
+            # Re-tag inside containerd: Podman loads as localhost/; pods resolve bare names to docker.io/library/
+            docker exec "${KIND_NODE}" ctr -n k8s.io images tag \
+                "localhost/${img}:latest" "docker.io/library/${img}:latest" 2>/dev/null || true
+            log_step "${img}:latest ready in Kind"
+        else
+            log_step "WARNING: ${img}:latest not found locally — pods will fail to schedule."
+            log_step "  Build it first: cd kagenti-extensions/authbridge && podman build -f cmd/authbridge/Dockerfile -t ${img}:latest ."
+        fi
+    done
+fi
+
+# ============================================================================
 # PHASE 3: Deploy Test Agents
 # ============================================================================
 
