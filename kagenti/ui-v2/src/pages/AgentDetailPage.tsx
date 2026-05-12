@@ -166,10 +166,10 @@ export const AgentDetailPage: React.FC = () => {
     queryKey: ['agent', namespace, name],
     queryFn: () => agentService.get(namespace!, name!),
     enabled: !!namespace && !!name,
+    retry: 3,
+    retryDelay: 2000,
     refetchInterval: (query) => {
-      // Poll every 5 seconds if agent is not ready
-      // Use readyStatus from backend (handles Deployment, StatefulSet, Job)
-      // For Jobs: stop polling once Completed or Failed, but continue for Running
+      if (!query.state.data) return 5000;
       const readyStatus = query.state.data?.readyStatus;
       const isStable = readyStatus === 'Ready' || readyStatus === 'Completed' || readyStatus === 'Failed';
       return isStable ? false : 5000;
