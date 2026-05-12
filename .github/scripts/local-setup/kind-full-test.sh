@@ -247,7 +247,12 @@ if [ "$RUN_INSTALL" = "true" ]; then
     ./.github/scripts/common/20-create-secrets.sh
 
     log_step "Running Kagenti installer..."
-    ./scripts/kind/setup-kagenti.sh --with-all --skip-cluster --build-images --cluster-name "$CLUSTER_NAME"
+    _SETUP_FLAGS=(--with-all --skip-cluster --build-images --cluster-name "$CLUSTER_NAME")
+    # Telemetry-sidecar branch: pass override file for authbridge-unified + lineage flag
+    if [ -f "$REPO_ROOT/scripts/kind/kind-telemetry-override.yaml" ]; then
+        _SETUP_FLAGS+=(--kagenti-values "$REPO_ROOT/scripts/kind/kind-telemetry-override.yaml")
+    fi
+    ./scripts/kind/setup-kagenti.sh "${_SETUP_FLAGS[@]}"
 
     log_step "Waiting for platform to be ready..."
     ./.github/scripts/common/40-wait-platform-ready.sh
@@ -312,6 +317,22 @@ if [ "$RUN_INSTALL" = "true" ] && [ "${IS_OPENSHIFT:-false}" != "true" ]; then
             log_step "  Build it first: cd kagenti-extensions/authbridge && podman build -f cmd/authbridge/Dockerfile -t ${img}:latest ."
         fi
     done
+fi
+
+# ============================================================================
+# PHASE 2d: Deploy Lineage Service (telemetry-sidecar branch)
+# Requires sibling ../data_lineage repo checked out on telemetry_sidecar branch.
+# Non-fatal: skip if repo not found.
+# ============================================================================
+LINEAGE_DEPLOY_SCRIPT="$REPO_ROOT/../data_lineage/lineage_service/manifests/deploy.sh"
+if [ "$RUN_INSTALL" = "true" ] && [ -f "$LINEAGE_DEPLOY_SCRIPT" ]; then
+    log_phase "PHASE 2d: Deploy Lineage Service"
+    log_step "Running lineage service deploy from sibling data_lineage repo..."
+    # deploy.sh expects CWD = kagenti repo root (chart path, kubectl contexts)
+    bash "$LINEAGE_DEPLOY_SCRIPT"
+    log_step "Lineage service deployed"
+elif [ "$RUN_INSTALL" = "true" ]; then
+    log_step "Skipping lineage service (../data_lineage/lineage_service/manifests/deploy.sh not found)"
 fi
 
 # ============================================================================

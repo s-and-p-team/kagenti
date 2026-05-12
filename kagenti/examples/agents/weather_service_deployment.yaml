@@ -50,7 +50,7 @@ spec:
         - name: MCP_URL
           value: "http://weather-tool-mcp.team1.svc.cluster.local:8000/mcp"
         - name: LLM_API_BASE
-          value: "http://dockerhost:11434/v1"
+          value: "http://host.docker.internal:11434/v1"
         - name: LLM_API_KEY
           value: "dummy"
         - name: LLM_MODEL

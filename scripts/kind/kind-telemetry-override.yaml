@@ -1,0 +1,27 @@
+# Telemetry-sidecar branch values override for local Kind deployment.
+#
+# Pass via: scripts/kind/setup-kagenti.sh --kagenti-values scripts/kind/kind-telemetry-override.yaml
+# Or via kind-full-test.sh (it auto-detects this file on the telemetry_sidecar branch).
+#
+# What this does:
+#   - Switches the envoyProxy sidecar to authbridge-unified:latest (includes
+#     the telemetry-processor binary alongside authbridge and Envoy).
+#   - Enables the Data Lineage feature flag (requires lineage-service deployed).
+#   - Enables Phoenix component in the kagenti chart (Observability nav item).
+#
+# The authbridge-unified image must be built locally before deploying:
+#   cd kagenti-extensions/authbridge
+#   docker build -f cmd/authbridge/Dockerfile -t authbridge-unified:latest .
+#   kind load docker-image authbridge-unified:latest --name kagenti
+
+kagenti-operator-chart:
+  defaults:
+    images:
+      envoyProxy: authbridge-unified:latest
+
+featureFlags:
+  lineage: true
+
+components:
+  phoenix:
+    enabled: true

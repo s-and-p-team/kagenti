@@ -42,6 +42,7 @@ WITH_BACKEND=false
 WITH_UI=false
 WITH_MCP_GATEWAY=false
 WITH_OTEL=false
+WITH_PHOENIX=false
 WITH_MLFLOW=false
 WITH_BUILDS=false
 WITH_KIALI=false
@@ -90,6 +91,7 @@ while [[ $# -gt 0 ]]; do
     --with-mcp-gateway) WITH_MCP_GATEWAY=true; shift ;;
     --with-kuadrant)    WITH_KUADRANT=true; shift ;;
     --with-otel)        WITH_OTEL=true; shift ;;
+    --with-phoenix)     WITH_PHOENIX=true; WITH_OTEL=true; shift ;;
     --with-mlflow)      WITH_MLFLOW=true; shift ;;
     --with-builds)      WITH_BUILDS=true; shift ;;
     --with-kiali)       WITH_KIALI=true; shift ;;
@@ -97,7 +99,7 @@ while [[ $# -gt 0 ]]; do
     --with-all)
       WITH_ISTIO=true; WITH_SPIRE=true; WITH_BACKEND=true; WITH_UI=true
       WITH_MCP_GATEWAY=true; WITH_KUADRANT=true; WITH_OTEL=true
-      WITH_MLFLOW=true; WITH_BUILDS=true; WITH_KIALI=true
+      WITH_PHOENIX=true; WITH_MLFLOW=true; WITH_BUILDS=true; WITH_KIALI=true
       WITH_AGENT_SANDBOX=true
       shift ;;
     --skip-cluster)     SKIP_CLUSTER=true; shift ;;
@@ -121,6 +123,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --with-mcp-gateway  Install MCP Gateway"
       echo "  --with-kuadrant     Install Kuadrant operator (auto-enables MCP Gateway)"
       echo "  --with-otel         Install OpenTelemetry collector"
+      echo "  --with-phoenix      Install Phoenix LLM observability (auto-enables OTel)"
       echo "  --with-mlflow       Install MLflow trace backend (auto-enables OTel)"
       echo "  --with-builds       Install Tekton + Shipwright"
       echo "  --with-kiali        Install Kiali + Prometheus (auto-enables Istio)"
@@ -189,6 +192,7 @@ echo "    UI:            $WITH_UI"
 echo "    MCP Gateway:   $WITH_MCP_GATEWAY"
 echo "    Kuadrant:      $WITH_KUADRANT"
 echo "    OTel:          $WITH_OTEL"
+echo "    Phoenix:       $WITH_PHOENIX"
 echo "    MLflow:        $WITH_MLFLOW"
 echo "    Builds:        $WITH_BUILDS"
 echo "    Kiali:         $WITH_KIALI"
@@ -541,6 +545,7 @@ DEPS_FLAGS=(
   --set "components.istio.enabled=false"
   --set "components.spire.enabled=${WITH_SPIRE}"
   --set "components.otel.enabled=${WITH_OTEL}"
+  --set "components.phoenix.enabled=${WITH_PHOENIX}"
   --set "components.metricsServer.enabled=${WITH_BACKEND}"
   --set "components.containerRegistry.enabled=${WITH_BUILDS}"
   --set "components.ingressGateway.enabled=true"
@@ -1100,6 +1105,7 @@ KAGENTI_FLAGS=(
   --set "components.mcpGateway.enabled=${WITH_MCP_GATEWAY}"
   --set "featureFlags.agentSandbox=${WITH_AGENT_SANDBOX}"
   --set "components.mlflow.enabled=${WITH_MLFLOW}"
+  --set "components.phoenix.enabled=${WITH_PHOENIX}"
   --set "ui.auth.enabled=$($WITH_SPIRE && echo true || echo false)"
   --set "mlflow.auth.enabled=false"
 )
