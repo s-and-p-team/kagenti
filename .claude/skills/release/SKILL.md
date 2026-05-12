@@ -86,7 +86,7 @@ grep -A2 'name: kagenti-' charts/kagenti/Chart.yaml
 grep -n 'tag:' charts/kagenti/values.yaml
 ```
 
-Flag any `tag: latest` entries — these must be pinned before RC or GA.
+Flag any `tag: latest` entries — these must be pinned before any release (including alphas).
 
 ### 1.4 Determine release type
 
@@ -125,10 +125,15 @@ Steps depend on the release type. Always follow the dependency order:
 
 ### 2.1 For Alpha
 
-Minimal preparation — alphas are tagged from `main`.
+Alphas are tagged from `main` with all image tags pinned.
 
 - [ ] Confirm CI passes on `main` for each repo being tagged
 - [ ] Determine next alpha number for each repo
+- [ ] Dependency repos tagged with alpha first
+- [ ] `charts/kagenti/Chart.yaml` updated with alpha sub-chart versions
+- [ ] `helm dependency update charts/kagenti/` run to regenerate `Chart.lock`
+- [ ] **All `tag: latest` in `charts/kagenti/values.yaml` replaced** with alpha tag
+- [ ] `ui.tag` and `backend.tag` updated to the alpha tag
 
 ### 2.2 For RC
 
@@ -419,10 +424,10 @@ Release notes: https://github.com/kagenti/kagenti/releases/tag/vX.Y.0
 
 | Type | Branch | Pin images? | Release notes | Announce? |
 |------|--------|-------------|---------------|-----------|
-| Alpha | `main` | No (optional) | Auto-generated | No |
+| Alpha | `main` | **Yes** — no `latest` | Auto-generated | No |
 | RC | `release-X.Y` | **Yes** — no `latest` | Summary + testing checklist | Team only |
 | GA | `release-X.Y` | **Yes** — no `latest` | Full notes + compatibility table | Public |
-| Patch | `release-X.Y` | **Yes** | Brief fix description | Public |
+| Patch | `release-X.Y` | **Yes** — no `latest` | Brief fix description | Public |
 
 ## Related Skills
 

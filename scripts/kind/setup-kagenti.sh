@@ -32,7 +32,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 CLUSTER_NAME="${CLUSTER_NAME:-kagenti}"
-KIND_CONFIG="${KIND_CONFIG:-$REPO_ROOT/deployments/ansible/kind/kind-config-registry.yaml}"
+KIND_CONFIG="${KIND_CONFIG:-$REPO_ROOT/scripts/kind/kind-config-registry.yaml}"
 DOMAIN="localtest.me"
 
 # Component flags (core is always true)
@@ -49,11 +49,12 @@ WITH_KUADRANT=false
 WITH_AGENT_SANDBOX=false
 SKIP_CLUSTER=false
 BUILD_IMAGES=false
+PRELOAD_IMAGES=false
 DRY_RUN=false
 SECRETS_FILE_ARG=""
 CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
 
-# Versions — keep in sync with deployments/ansible/default_values.yaml
+# Versions
 CERT_MANAGER_VERSION="v1.17.2"
 ISTIO_VERSION="1.28.0"
 SPIRE_CRD_VERSION="0.5.0"
@@ -63,7 +64,10 @@ TEKTON_VERSION="v0.66.0"
 SHIPWRIGHT_VERSION="v0.14.0"
 MCP_GATEWAY_VERSION="0.6.0"
 KUADRANT_VERSION="1.4.2"
-AGENT_SANDBOX_VERSION="v0.3.10"
+AGENT_SANDBOX_VERSION="v0.4.3"
+
+KAGENTI_DEPS_VALUES_FILES=()
+KAGENTI_VALUES_FILES=()
 
 # ── Colors & logging ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -98,9 +102,12 @@ while [[ $# -gt 0 ]]; do
       shift ;;
     --skip-cluster)     SKIP_CLUSTER=true; shift ;;
     --build-images)     BUILD_IMAGES=true; shift ;;
+    --preload-images)   PRELOAD_IMAGES=true; shift ;;
     --secrets-file)     SECRETS_FILE_ARG="$2"; shift 2 ;;
     --cluster-name)     CLUSTER_NAME="$2"; shift 2 ;;
     --domain)           DOMAIN="$2"; shift 2 ;;
+    --kagenti-values)   KAGENTI_VALUES_FILES+=("--values" "$2"); shift 2 ;;
+    --kagenti-deps-values) KAGENTI_DEPS_VALUES_FILES+=("--values" "$2"); shift 2 ;;
     --dry-run)          DRY_RUN=true; shift ;;
     -h|--help)
       echo "Usage: $0 [OPTIONS]"
@@ -124,10 +131,16 @@ while [[ $# -gt 0 ]]; do
       echo "  --skip-cluster      Don't create Kind cluster (reuse existing)"
       echo "  --build-images      Build platform images from source and load into Kind"
       echo "                      (backend, ui-v2, agent-oauth-secret, mlflow-oauth-secret)"
+      echo "  --preload-images    Pre-pull third-party images and load into Kind for"
+      echo "                      faster pod startup (reads scripts/kind/preload-images.txt)"
       echo "  --secrets-file FILE YAML file with secrets (keys: githubUser, githubToken,"
       echo "                      openaiApiKey, slackBotToken, etc.)"
       echo "  --cluster-name NAME Kind cluster name (default: kagenti)"
       echo "  --domain DOMAIN     Domain for services (default: localtest.me)"
+      echo "  --kagenti-values FILE"
+      echo "                      Helm override file to apply to Kagenti chart"
+      echo "  --kagenti-deps-values FILE"
+      echo "                      Helm override file to apply to Kagenti-deps chart"
       echo "  --dry-run           Show commands without executing"
       echo "  -h, --help          Show this help"
       exit 0 ;;
@@ -182,6 +195,9 @@ echo "    Kiali:         $WITH_KIALI"
 echo "    Agent Sandbox: $WITH_AGENT_SANDBOX"
 echo "    Skip cluster:  $SKIP_CLUSTER"
 echo "    Build images:  $BUILD_IMAGES"
+echo "    Preload imgs:  $PRELOAD_IMAGES"
+echo "    Kagenti helm --values overrides: ${KAGENTI_VALUES_FILES[*]}"
+echo "    Kagenti-deps helm --values overrides: ${KAGENTI_DEPS_VALUES_FILES[*]}"
 echo ""
 
 for cmd in helm kubectl; do
@@ -250,6 +266,67 @@ kubectl cluster-info --context "kind-${CLUSTER_NAME}" &>/dev/null || true
 echo ""
 
 # ============================================================================
+# Step 1b: Preload images (--preload-images)
+# ============================================================================
+PRELOAD_LOAD_PID=""
+if $PRELOAD_IMAGES && ! $DRY_RUN; then
+  PRELOAD_FILE="$SCRIPT_DIR/preload-images.txt"
+  if [ ! -f "$PRELOAD_FILE" ]; then
+    log_error "Preload images file not found: $PRELOAD_FILE"
+    exit 1
+  fi
+
+  mapfile -t PRELOAD_LIST < <(grep -v '^\s*#' "$PRELOAD_FILE" | grep -v '^\s*$')
+  if [ ${#PRELOAD_LIST[@]} -eq 0 ]; then
+    log_warn "Preload images file is empty — skipping"
+  else
+    log_info "Pulling ${#PRELOAD_LIST[@]} images for preload..."
+
+    if [ "$CONTAINER_ENGINE" = "podman" ]; then
+      for img in "${PRELOAD_LIST[@]}"; do
+        $CONTAINER_ENGINE pull "$img" 2>&1 | grep -E "^(Status:|Error|Trying to pull)" || true
+      done
+    else
+      PULL_PIDS=""
+      for img in "${PRELOAD_LIST[@]}"; do
+        ($CONTAINER_ENGINE pull "$img" >/dev/null 2>&1) &
+        PULL_PIDS="$PULL_PIDS $!"
+      done
+      PULL_FAIL=0
+      for pid in $PULL_PIDS; do
+        wait "$pid" || PULL_FAIL=1
+      done
+      if [ $PULL_FAIL -ne 0 ]; then
+        log_warn "Some images failed to pull — continuing (pods will pull on demand)"
+      fi
+    fi
+    log_success "Image pull complete"
+
+    # Load into Kind node asynchronously using a single batched tar
+    # (docker save + ctr import — avoids 'kind load docker-image' issues on
+    # Rancher Desktop VZ and reduces IPC round-trips vs per-image loading)
+    log_info "Loading ${#PRELOAD_LIST[@]} images into Kind node (background)..."
+    (
+      tmp=$(mktemp /tmp/kind-preload-XXXXXX.tar)
+      trap 'rm -f "$tmp"' EXIT
+      if $CONTAINER_ENGINE save "${PRELOAD_LIST[@]}" -o "$tmp" 2>/dev/null && \
+         $CONTAINER_ENGINE cp "$tmp" "${CLUSTER_NAME}-control-plane:/preload-images.tar" 2>/dev/null && \
+         $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" \
+           ctr --namespace=k8s.io images import /preload-images.tar >/dev/null 2>&1; then
+        $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" rm -f /preload-images.tar 2>/dev/null || true
+        exit 0
+      else
+        $CONTAINER_ENGINE exec "${CLUSTER_NAME}-control-plane" rm -f /preload-images.tar 2>/dev/null || true
+        exit 1
+      fi
+    ) &
+    PRELOAD_LOAD_PID=$!
+  fi
+elif $PRELOAD_IMAGES && $DRY_RUN; then
+  log_info "[dry-run] Would preload images from $SCRIPT_DIR/preload-images.txt"
+fi
+
+# ============================================================================
 # Step 2: Install cert-manager (core — required by webhook TLS)
 # ============================================================================
 log_info "Step 2: cert-manager"
@@ -293,6 +370,8 @@ if $WITH_ISTIO; then
   log_info "Step 3a: Istio Ambient Mesh"
 
   log_info "Upgrading istiod to ambient profile..."
+  # Remove webhook managed by pilot-discovery to avoid Helm server-side apply conflict
+  kubectl delete validatingwebhookconfiguration istio-validator-istio-system --ignore-not-found
   run_cmd helm upgrade --install istiod istiod \
     --repo "$ISTIO_REPO" --version "$ISTIO_VERSION" \
     -n istio-system --wait \
@@ -469,11 +548,11 @@ DEPS_FLAGS=(
   --set "components.tekton.enabled=false"
   --set "components.shipwright.enabled=false"
   --set "components.kiali.enabled=${WITH_KIALI}"
-  --set "components.phoenix.enabled=false"
   --set "components.mlflow.enabled=${WITH_MLFLOW}"
   --set "mlflow.auth.enabled=${WITH_MLFLOW}"
   --set "components.rhoai.enabled=false"
 )
+DEPS_FLAGS=( "${DEPS_FLAGS[@]}" "${KAGENTI_DEPS_VALUES_FILES[@]}" )
 
 log_info "Installing kagenti-deps..."
 # --skip-crds: Gateway API CRDs already installed in Step 5 at a newer version;
@@ -840,6 +919,16 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 EOF
 
+  # Build and load spiffe-idp-setup image to ensure correct arch for Kind
+  if $BUILD_IMAGES; then
+    log_info "Building spiffe-idp-setup image for Kind..."
+    $CONTAINER_ENGINE build --load \
+      -t "$SPIFFE_IDP_IMAGE" \
+      -f "$REPO_ROOT/kagenti/auth/spiffe-idp-setup/Dockerfile" \
+      "$REPO_ROOT/kagenti"
+    kind load docker-image "$SPIFFE_IDP_IMAGE" --name "$CLUSTER_NAME"
+  fi
+
   # Delete existing job (jobs are immutable)
   kubectl delete job kagenti-spiffe-idp-setup-job -n "$KAGENTI_NS" --ignore-not-found 2>/dev/null || true
 
@@ -921,19 +1010,10 @@ fi
 # ============================================================================
 log_info "Step 8: kagenti"
 
-# Detect latest release tag for UI images (skip when building from source)
-KAGENTI_TAG="latest"
-if $WITH_UI && ! $BUILD_IMAGES; then
-  log_info "Detecting latest kagenti release tag..."
-  DETECTED_TAG=$(git ls-remote --tags --sort="v:refname" https://github.com/kagenti/kagenti.git 2>/dev/null | \
-    tail -n1 | sed 's|.*refs/tags/||; s/\^{}//' || echo "")
-  if [ -n "$DETECTED_TAG" ]; then
-    KAGENTI_TAG="$DETECTED_TAG"
-    log_success "Using tag: $KAGENTI_TAG"
-  else
-    log_warn "Could not detect latest tag — using 'latest'"
-  fi
-fi
+# Image tags come from charts/kagenti/values.yaml (pinned at release time by
+# chore(release) commits — see docs/releasing.md). The only override is below
+# in KAGENTI_FLAGS when --build-images is set, since locally-built images are
+# tagged ":latest" and loaded into Kind.
 
 # Secrets file resolution (checked in order of precedence):
 #   1. --secrets-file CLI argument
@@ -963,6 +1043,16 @@ kubectl delete job kagenti-ui-oauth-secret-job -n kagenti-system --ignore-not-fo
 kubectl delete job kagenti-agent-oauth-secret-job -n kagenti-system --ignore-not-found 2>/dev/null || true
 kubectl delete job mlflow-oauth-secret-job -n kagenti-system --ignore-not-found 2>/dev/null || true
 
+# ── Wait for preload to finish (if running) ──
+if [ -n "$PRELOAD_LOAD_PID" ]; then
+  log_info "Waiting for image preload to complete..."
+  if wait "$PRELOAD_LOAD_PID"; then
+    log_success "All images preloaded into Kind"
+  else
+    log_warn "Some images failed to load — pods will pull on demand"
+  fi
+fi
+
 # ── Build platform images from source (--build-images) ──
 if $BUILD_IMAGES && ! $DRY_RUN; then
   log_info "Building platform images from source..."
@@ -977,6 +1067,7 @@ if $BUILD_IMAGES && ! $DRY_RUN; then
   fi
   if $WITH_UI; then
     _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/ui-v2:latest|ui-v2/Dockerfile")
+    _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/ui-oauth-secret:latest|auth/ui-oauth-secret/Dockerfile")
   fi
   if $WITH_MLFLOW; then
     _BUILD_IMAGES+=("ghcr.io/kagenti/kagenti/mlflow-oauth-secret:latest|auth/mlflow-oauth-secret/Dockerfile")
@@ -999,6 +1090,8 @@ fi
 KAGENTI_FLAGS=(
   --set "openshift=false"
   --set "domain=${DOMAIN}"
+  --set "keycloak.publicUrl=http://keycloak.${DOMAIN}:8080"
+  --set "mlflow.url=http://mlflow.${DOMAIN}:8080"
   --set "components.agentNamespaces.enabled=true"
   --set "components.agentOperator.enabled=true"
   --set "components.ui.enabled=${WITH_BACKEND}"
@@ -1006,13 +1099,29 @@ KAGENTI_FLAGS=(
   --set "components.istio.enabled=${WITH_ISTIO}"
   --set "components.mcpGateway.enabled=${WITH_MCP_GATEWAY}"
   --set "featureFlags.agentSandbox=${WITH_AGENT_SANDBOX}"
-  --set "components.phoenix.enabled=false"
   --set "components.mlflow.enabled=${WITH_MLFLOW}"
-  --set "ui.frontend.tag=${KAGENTI_TAG}"
-  --set "ui.backend.tag=${KAGENTI_TAG}"
   --set "ui.auth.enabled=$($WITH_SPIRE && echo true || echo false)"
   --set "mlflow.auth.enabled=${WITH_MLFLOW}"
 )
+KAGENTI_FLAGS=( "${KAGENTI_FLAGS[@]}" "${KAGENTI_VALUES_FILES[@]}" )
+
+# When --build-images is set, the build step tags images ":latest" and loads
+# them into Kind (see list above). Override the chart's release-pinned tags
+# for exactly those images so pods use the locally-built copies instead of
+# pulling pinned tags from ghcr.io. Image selection mirrors _BUILD_IMAGES.
+if $BUILD_IMAGES; then
+  KAGENTI_FLAGS+=(--set "agentOAuthSecret.tag=latest")
+  if $WITH_BACKEND; then
+    KAGENTI_FLAGS+=(--set "ui.backend.tag=latest")
+  fi
+  if $WITH_UI; then
+    KAGENTI_FLAGS+=(--set "ui.frontend.tag=latest")
+    KAGENTI_FLAGS+=(--set "uiOAuthSecret.tag=latest")
+  fi
+  if $WITH_MLFLOW; then
+    KAGENTI_FLAGS+=(--set "mlflowOAuthSecret.tag=latest")
+  fi
+fi
 
 log_info "Installing kagenti..."
 run_cmd helm upgrade --install kagenti "$REPO_ROOT/charts/kagenti/" \
@@ -1163,8 +1272,26 @@ if $WITH_SPIRE; then
   echo "  Tornjak:      http://spire-tornjak-ui.${DOMAIN}:8080"
 fi
 echo ""
-echo "  Keycloak credentials:"
-echo "    kubectl get secret keycloak-initial-admin -n keycloak -o go-template='User: {{.data.username | base64decode}}  Pass: {{.data.password | base64decode}}'"
+echo "  Credentials:"
+KC_ADMIN_USER=$(kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.username}' 2>/dev/null | base64 -d 2>/dev/null)
+KC_ADMIN_PASS=$(kubectl get secret keycloak-initial-admin -n keycloak -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null)
+if [ -n "$KC_ADMIN_PASS" ]; then
+  echo "    Keycloak admin console: ${KC_ADMIN_USER} / ${KC_ADMIN_PASS}"
+else
+  echo "    Keycloak admin console: (pending — secret keycloak-initial-admin not ready)"
+fi
+if $WITH_UI; then
+  UI_USER=$(kubectl get secret kagenti-test-user -n keycloak -o jsonpath='{.data.username}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+  UI_PASS=$(kubectl get secret kagenti-test-user -n keycloak -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")
+  if [ -n "$UI_PASS" ]; then
+    echo "    Kagenti UI login:       ${UI_USER} / ${UI_PASS}"
+  else
+    echo "    Kagenti UI login:       (pending — run show-services.sh once platform is ready)"
+  fi
+fi
+echo ""
+echo "  For full service URLs and credentials, run:"
+echo "    .github/scripts/local-setup/show-services.sh"
 echo ""
 
 ELAPSED=$(( SECONDS - START_SECONDS ))

@@ -16,7 +16,7 @@
 #   - Label serves as visual indicator of approval status
 #   - New commits require re-approval (TOCTOU protection)
 #
-name: E2E OCP 4.20.11 (HyperShift PR)
+name: E2E OCP 4.20.21 (HyperShift PR)
 
 on:
   issue_comment:
@@ -27,7 +27,7 @@ permissions: {}
 
 # Version tracking - keep workflow name in sync with OCP_VERSION
 env:
-  OCP_VERSION: '4.20.11'  # Update workflow name when changing default
+  OCP_VERSION: '4.20.21'  # Update workflow name when changing default
   MAX_SLOTS: '6'
   SLOT_TIMEOUT: '60'
 
@@ -38,10 +38,11 @@ jobs:
   authorize:
     name: Authorize
     runs-on: ubuntu-latest
-    # Only run for PR comments starting with /run-e2e
+    # Only run for /run-e2e (not /run-e2e-openshell which is a different workflow)
     if: |
       github.event.issue.pull_request &&
-      startsWith(github.event.comment.body, '/run-e2e')
+      startsWith(github.event.comment.body, '/run-e2e') &&
+      !startsWith(github.event.comment.body, '/run-e2e-')
     permissions:
       pull-requests: write
       contents: read
@@ -370,7 +371,7 @@ jobs:
         run: bash .github/scripts/hypershift/ci/80-run-e2e-tests.sh
         env:
           KUBECONFIG: ${{ steps.create-cluster.outputs.cluster_kubeconfig }}
-          KAGENTI_CONFIG_FILE: deployments/envs/ocp_values.yaml
+          KAGENTI_CONFIG_FILE: deployments/envs/ocp_ci_values.yaml
 
       - name: Run UI E2E tests
         if: success()

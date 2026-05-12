@@ -6,7 +6,7 @@
  */
 
 // Workload types for agent deployment
-export type WorkloadType = 'deployment' | 'statefulset' | 'job';
+export type WorkloadType = 'deployment' | 'statefulset' | 'job' | 'sandbox';
 
 // Agent types
 export interface AgentLabels {
@@ -401,4 +401,98 @@ export interface MountInfo {
 export interface PodStorageStats {
   mounts: MountInfo[];
   total_mounts: number;
+}
+
+// Skill types
+export interface SkillLabels {
+  category?: string;
+  type?: string;
+}
+
+export interface Skill {
+  name: string;
+  namespace: string;
+  resourceName: string;
+  description: string;
+  status: string;
+  labels: SkillLabels;
+  createdAt?: string;
+  origin?: string;
+  usageCount: number;
+}
+
+export interface SkillFile {
+  name: string;
+  path: string;
+  content: string;
+  size: number;
+}
+
+export interface SkillDetail extends Skill {
+  dataKeys: string[];
+  annotations: Record<string, string>;
+  files: SkillFile[];
+}
+
+export interface CreateSkillRequest {
+  name: string;
+  namespace: string;
+  description?: string;
+  category?: string;
+  url?: string;
+  files?: Record<string, string>;
+}
+
+export interface CreateSkillResponse {
+  success: boolean;
+  name: string;
+  namespace: string;
+  message: string;
+}
+
+// AuthBridge types
+export interface AuthBridgeConfig {
+  AuthBridge: boolean | null;
+  mode: string | null;
+  pipeline: PipelineConfig | null;
+}
+
+export interface PipelineConfig {
+  inbound: PipelineStageConfig | null;
+  outbound: PipelineStageConfig | null;
+}
+
+export interface PipelineStageConfig {
+  plugins: PluginConfig[];
+}
+
+export interface PluginConfig {
+  name: string;
+  config: Record<string, unknown>;
+}
+
+export interface JwtValidationPluginConfig {
+  issuer: string;
+  keycloak_url: string;
+  keycloak_realm: string;
+}
+
+export interface TokenExchangePluginConfig {
+  keycloak_url: string;
+  keycloak_realm: string;
+  default_policy: string;
+  identity: IdentityConfig;
+}
+
+export interface IdentityConfig {
+  type: string; // "spiffe" | "client-secret"
+}
+
+export interface AuthBridgeStats {
+  AuthBridge: boolean | null;
+  inbound_approvals: Record<string, number> | null;
+  inbound_denials: Record<string, number> | null;
+  outbound_approvals: Record<string, number> | null;
+  outbound_denials: Record<string, number> | null;
+  outbound_replace_tokens: Record<string, number> | null;
 }

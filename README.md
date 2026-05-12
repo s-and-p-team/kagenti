@@ -3,7 +3,7 @@
 
 [![CI](https://github.com/kagenti/kagenti/actions/workflows/ci.yaml/badge.svg)](https://github.com/kagenti/kagenti/actions/workflows/ci.yaml)
 [![E2E K8s 1.35.0 (Kind)](https://github.com/kagenti/kagenti/actions/workflows/e2e-kind.yaml/badge.svg)](https://github.com/kagenti/kagenti/actions/workflows/e2e-kind.yaml)
-[![E2E OCP 4.20.11 (HyperShift)](https://github.com/kagenti/kagenti/actions/workflows/e2e-hypershift.yaml/badge.svg)](https://github.com/kagenti/kagenti/actions/workflows/e2e-hypershift.yaml)
+[![E2E OCP 4.20.21 (HyperShift)](https://github.com/kagenti/kagenti/actions/workflows/e2e-hypershift.yaml/badge.svg)](https://github.com/kagenti/kagenti/actions/workflows/e2e-hypershift.yaml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kagenti/kagenti/badge)](https://scorecard.dev/viewer/?uri=github.com/kagenti/kagenti)
 [![GitHub Release](https://img.shields.io/github/v/release/kagenti/kagenti)](https://github.com/kagenti/kagenti/releases/latest)
 [![License](https://img.shields.io/github/license/kagenti/kagenti)](LICENSE)
@@ -127,8 +127,8 @@ git checkout v0.5.1
 cp deployments/envs/secret_values.yaml.example deployments/envs/.secret_values.yaml
 # Edit deployments/envs/.secret_values.yaml with your values
 
-# Run the Ansible-based installer
-deployments/ansible/run-install.sh --env dev
+# Deploy to Kind cluster
+scripts/kind/setup-kagenti.sh --with-ui --with-spire --with-agent-sandbox --with-builds
 ```
 
 > **Tip:** To find the latest stable version from the command line:
@@ -136,7 +136,7 @@ deployments/ansible/run-install.sh --env dev
 > git tag --list 'v*' --sort=-v:refname | grep -v -E '(alpha|rc)' | head -1
 > ```
 
-Use `deployments/ansible/run-install.sh --help` for options. For more detailed installation instructions including OpenShift refer to [Installation Guide](./docs/install.md).
+For all available installer options and detailed instructions (including OpenShift), refer to the [Installation Guide](./docs/install.md).
 
 ### Access the UI
 

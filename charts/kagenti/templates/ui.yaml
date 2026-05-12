@@ -132,6 +132,12 @@ spec:
               value: "{{ .Values.featureFlags.triggers }}"
             - name: KAGENTI_FEATURE_FLAG_AGENT_SANDBOX
               value: "{{ .Values.featureFlags.agentSandbox }}"
+            - name: KAGENTI_FEATURE_FLAG_SKILLS
+              value: "{{ .Values.featureFlags.skills }}"
+            - name: KAGENTI_FEATURE_FLAG_AUTHBRIDGE_API
+              value: "{{ .Values.featureFlags.authbridgeAPI }}"
+            - name: KAGENTI_FEATURE_FLAG_ADMIN
+              value: "{{ .Values.featureFlags.admin }}"
             - name: KEYCLOAK_URL
               value: {{ .Values.keycloak.url | quote }}
             - name: KEYCLOAK_PUBLIC_URL
@@ -390,6 +396,9 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
   {{- if .Values.featureFlags.sandbox }}
   # Sandbox-specific: create pods, exec, logs, and mutate configmaps/secrets/PVCs
   - apiGroups: [""]
@@ -439,10 +448,10 @@ rules:
     resources: ["routes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   {{- if .Values.featureFlags.agentSandbox }}
-  # agent-sandbox (kubernetes-sigs) Sandbox CRs
+  # agent-sandbox (kubernetes-sigs) — direct Sandbox management
   - apiGroups: ["agents.x-k8s.io"]
     resources: ["sandboxes"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    verbs: ["get", "list", "watch", "create", "delete"]
   {{- end }}
   {{- if .Values.featureFlags.integrations }}
   # Integration CRDs for repository integrations

@@ -247,7 +247,7 @@ if [ "$RUN_INSTALL" = "true" ]; then
     ./.github/scripts/common/20-create-secrets.sh
 
     log_step "Running Kagenti installer..."
-    ./scripts/kind/setup-kagenti.sh --with-all --skip-cluster --cluster-name "$CLUSTER_NAME"
+    ./scripts/kind/setup-kagenti.sh --with-all --skip-cluster --build-images --cluster-name "$CLUSTER_NAME"
 
     log_step "Waiting for platform to be ready..."
     ./.github/scripts/common/40-wait-platform-ready.sh
@@ -274,8 +274,9 @@ fi
 # with the old chart binaries. Build from source to match.
 # ============================================================================
 if [ -z "${KAGENTI_DEP_BUILDS:-}" ] || [ "${KAGENTI_DEP_BUILDS:-}" = "[]" ]; then
-    # Default: build webhook from extensions main (proxy-init fix not yet released)
-    # TODO: Remove after bumping kagenti-webhook-chart to >= v0.4.0-alpha.9
+    # Default: build proxy-init from kagenti-extensions main so the packaged
+    # chart deps pick up the latest init-container fixes even when the chart
+    # is pinned to an older release.
     export KAGENTI_DEP_BUILDS='[{"repo":"kagenti/kagenti-extensions","ref":"main"}]'
 fi
 if [ "${KAGENTI_DEP_BUILDS:-}" != "[]" ] && [ "$RUN_INSTALL" = "true" ]; then
@@ -360,6 +361,9 @@ else
     echo ""
     echo "Cluster kept for debugging. To destroy later:"
     echo "  ./.github/scripts/kind/destroy-cluster.sh"
+    echo ""
+    echo "To view service URLs and login credentials:"
+    echo "  ./.github/scripts/local-setup/show-services.sh"
     echo ""
 fi
 
