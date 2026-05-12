@@ -35,7 +35,7 @@ import {
   Checkbox,
 } from '@patternfly/react-core';
 import { TrashIcon, PlusCircleIcon, UploadIcon } from '@patternfly/react-icons';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { agentService, ShipwrightBuildConfig } from '@/services/api';
 import { NamespaceSelector } from '@/components/NamespaceSelector';
@@ -108,6 +108,7 @@ interface ServicePort {
 
 export const ImportAgentPage: React.FC = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const features = useFeatureFlags();
 
   // Deployment method
@@ -217,9 +218,8 @@ export const ImportAgentPage: React.FC = () => {
     mutationFn: (data: Parameters<typeof agentService.create>[0]) =>
       agentService.create(data),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['agents'] });
       const finalName = name || getNameFromPath();
-      // Navigate to build progress page if using Shipwright for source builds
-      // Always navigate to build page for source builds (Shipwright)
       if (deploymentMethod === 'source') {
         navigate(`/agents/${namespace}/${finalName}/build`);
       } else {
