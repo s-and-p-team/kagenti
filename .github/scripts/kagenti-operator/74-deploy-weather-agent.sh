@@ -15,7 +15,9 @@ log_step "74" "Deploying weather-service agent"
 # On Kind, the deployment manifest references ghcr.io directly — no build needed.
 # ============================================================================
 
-if [ "$IS_OPENSHIFT" = "true" ]; then
+SHIPWRIGHT_BUILD=false
+if [ "$IS_OPENSHIFT" = "true" ] && kubectl get crd builds.shipwright.io &>/dev/null; then
+    SHIPWRIGHT_BUILD=true
     log_info "Using OpenShift Shipwright files with internal registry"
 
     # Clean up previous Build to avoid conflicts
@@ -82,7 +84,7 @@ if [ "$IS_OPENSHIFT" = "true" ]; then
 
     log_success "BuildRun completed successfully"
 else
-    log_info "Using ghcr.io image for Kind — skipping Shipwright build"
+    log_info "Shipwright not available — using ghcr.io image"
 fi
 
 # ============================================================================
@@ -95,11 +97,32 @@ log_info "Creating Deployment and Service..."
 # Create ServiceAccount (required by webhook for correct SPIFFE ID derivation)
 kubectl create serviceaccount weather-service -n team1 --dry-run=client -o yaml | kubectl apply -f -
 
-# Apply Deployment manifest (use OCP-specific file with correct registry on OpenShift)
-if [ "$IS_OPENSHIFT" = "true" ]; then
+# Apply Deployment manifest
+if [ "$SHIPWRIGHT_BUILD" = "true" ]; then
+    # Shipwright built the image into the internal registry — use OCP manifest
     kubectl apply -f "$REPO_ROOT/kagenti/examples/agents/weather_service_deployment_ocp.yaml"
 else
+    # Use ghcr.io image (Kind manifest)
     kubectl apply -f "$REPO_ROOT/kagenti/examples/agents/weather_service_deployment.yaml"
+
+    # On OpenShift without Shipwright, patch LLM config to use external endpoint
+    # (Kind manifest points to dockerhost:11434 which doesn't exist on OCP)
+    if [ "$IS_OPENSHIFT" = "true" ]; then
+        log_info "Patching LLM config for OpenShift (no local Ollama)..."
+        kubectl set env deployment/weather-service -n team1 \
+            LLM_API_BASE="https://litellm-prod.apps.maas.redhatworkshops.io/v1" \
+            LLM_MODEL="llama-scout-17b" \
+            LLM_API_KEY- OPENAI_API_KEY- 2>/dev/null || true
+        # Set API keys from secret if it exists
+        if kubectl get secret openai-secret -n team1 &>/dev/null; then
+            kubectl patch deployment weather-service -n team1 --type=json -p '[
+                {"op":"add","path":"/spec/template/spec/containers/0/env/-","value":{"name":"LLM_API_KEY","valueFrom":{"secretKeyRef":{"name":"openai-secret","key":"apikey"}}}},
+                {"op":"add","path":"/spec/template/spec/containers/0/env/-","value":{"name":"OPENAI_API_KEY","valueFrom":{"secretKeyRef":{"name":"openai-secret","key":"apikey"}}}}
+            ]' || true
+        else
+            log_warn "openai-secret not found in team1 — LLM calls will fail without API key"
+        fi
+    fi
 fi
 
 # Apply Service manifest

@@ -21,6 +21,13 @@ import type {
   FileEntry,
   FileContent,
   PodStorageStats,
+  Skill,
+  SkillDetail,
+  SkillFile,
+  CreateSkillRequest,
+  CreateSkillResponse,
+  AuthBridgeConfig,
+  AuthBridgeStats,
 } from '@/types';
 
 // API configuration
@@ -204,7 +211,7 @@ export const agentService = {
       };
     }>;
     // Workload type
-    workloadType?: 'deployment' | 'statefulset' | 'job';
+    workloadType?: 'deployment' | 'statefulset' | 'job' | 'sandbox';
     // New fields for deployment method
     deploymentMethod?: 'source' | 'image';
     // Build from source fields
@@ -704,11 +711,34 @@ export interface DashboardConfig {
 }
 
 /**
+ * Platform status types
+ */
+export interface ComponentStatus {
+  name: string;
+  status: 'Ready' | 'Degraded' | 'Missing' | 'Unknown';
+}
+
+export interface RegistryBuildInfo {
+  clusterBuildStrategyPresent: boolean;
+  clusterBuildStrategies: string[];
+  registryEndpoint: string;
+}
+
+export interface PlatformStatusResponse {
+  components: ComponentStatus[];
+  registry: RegistryBuildInfo;
+}
+
+/**
  * Config service
  */
 export const configService = {
   async getDashboards(): Promise<DashboardConfig> {
     return apiFetch('/config/dashboards');
+  },
+
+  async getPlatformStatus(): Promise<PlatformStatusResponse> {
+    return apiFetch('/config/platform-status');
   },
 };
 
@@ -1529,5 +1559,64 @@ export const lineageService = {
     if (prefix) q.set('prefix', prefix);
     q.set('limit', '30');
     return apiFetch<string[]>(`/lineage/autocomplete/tools?${q}`);
+  },
+};
+
+/**
+ * Skill service
+ */
+export const skillService = {
+  async list(namespace: string, query?: string): Promise<Skill[]> {
+    const params = new URLSearchParams({ namespace });
+    if (query) {
+      params.append('q', query);
+    }
+    const response = await apiFetch<ApiListResponse<Skill>>(`/skills?${params.toString()}`);
+    return response.items;
+  },
+
+  async get(namespace: string, name: string): Promise<SkillDetail> {
+    return apiFetch(`/skills/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`);
+  },
+
+  async getFile(namespace: string, name: string, filePath: string): Promise<SkillFile> {
+    return apiFetch(
+      `/skills/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/files/${encodeURIComponent(filePath)}`
+    );
+  },
+
+  async create(data: CreateSkillRequest): Promise<CreateSkillResponse> {
+    return apiFetch('/skills', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async incrementUsage(namespace: string, name: string): Promise<Skill> {
+    return apiFetch(
+      `/skills/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/usage`,
+      {
+        method: 'POST',
+      }
+    );
+  },
+
+  async delete(namespace: string, name: string): Promise<{ success: boolean; message: string }> {
+    return apiFetch(
+      `/skills/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+  },
+};
+
+export const authBridgeService = {
+  async getConfig(namespace: string, name: string): Promise<AuthBridgeConfig> {
+    return apiFetch(`/agents/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/identity-config`);
+  },
+
+  async getStatus(namespace: string, name: string): Promise<AuthBridgeStats> {
+    return apiFetch(`/agents/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/identity-status`);
   },
 };

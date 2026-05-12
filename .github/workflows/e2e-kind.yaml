@@ -29,12 +29,15 @@ permissions:
 # Version tracking - keep in sync with kind-config in scripts/kind/setup-kagenti.sh
 env:
   K8S_VERSION: '1.35.0'  # Must match kindest/node version in kind-config
+  # kagenti-extensions ref for AuthBridge weather E2E (pin to a release tag once the demo is in a tagged release).
+  KAGENTI_EXTENSIONS_GIT_REF: 'main'
 
 jobs:
   e2e-dev-kagenti-operator:
     name: Deploy & Test
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Includes kagenti-extensions AuthBridge E2E (clone, Keycloak, advanced deploys).
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
@@ -125,6 +128,79 @@ jobs:
       - name: Run backend E2E tests
         if: success()
         run: bash .github/scripts/kagenti-operator/90-run-e2e-tests.sh
+
+      # See e2e-kind-pr.yaml: single-node Kind cannot run wave-90 and wave-91
+      # full weather stacks concurrently without Insufficient cpu on the agent.
+      - name: Free capacity for AuthBridge weather (scale baseline weather)
+        if: success()
+        run: bash .github/scripts/kind/90b-free-capacity-for-advanced-weather.sh
+        env:
+          NAMESPACE: team1
+
+      # kagenti-extensions: authbridge/demos/weather-agent (token exchange + tool inbound JWT). Not a lightweight check.
+      - name: AuthBridge Weather (advanced) E2E
+        if: success()
+        run: bash .github/scripts/kind/91-run-authbridge-weather-e2e.sh
+        env:
+          NAMESPACE: team1
+
+      - name: Restore baseline weather for UI E2E
+        if: success()
+        run: bash .github/scripts/kind/90c-restore-baseline-weather-for-ui.sh
+        env:
+          NAMESPACE: team1
+
+      # ── Token Exchange E2E (community Keycloak, fatal) ───────────────────
+      - name: Setup Keycloak realm for token exchange
+        if: success()
+        run: bash .github/scripts/token-exchange/40-setup-keycloak-realm.sh
+
+      - name: Enable kagenti in token exchange namespace
+        if: success()
+        run: bash .github/scripts/token-exchange/50-enable-kagenti-ns.sh
+        env:
+          PLATFORM: kind
+
+      - name: Setup SPIFFE Identity Provider
+        if: success()
+        run: bash .github/scripts/token-exchange/55-setup-spiffe-idp.sh
+        env:
+          PLATFORM: kind
+
+      - name: Deploy token exchange test workloads
+        if: success()
+        run: bash .github/scripts/token-exchange/70-deploy-test-workloads.sh
+
+      - name: Enable SPIFFE identity for token exchange
+        if: success()
+        run: bash .github/scripts/token-exchange/56-enable-spiffe.sh
+        env:
+          PLATFORM: kind
+
+      - name: Configure FGAP token exchange
+        if: success()
+        run: bash .github/scripts/token-exchange/60-configure-fgap.sh
+
+      - name: Wait for token exchange workloads to stabilize
+        if: success()
+        run: |
+          sleep 30
+          kubectl rollout status deployment/tx-e2e-agent -n tx-e2e --timeout=300s || true
+          kubectl rollout status deployment/tx-e2e-tool -n tx-e2e --timeout=300s || true
+          for i in $(seq 1 30); do
+            CREDS=$(kubectl get secrets -n tx-e2e -o name | grep -c kagenti-keycloak-client-credentials || echo "0")
+            [ "$CREDS" -ge 2 ] && echo "Credentials ready ($CREDS)" && break
+            echo "Waiting for credentials ($CREDS/2)..."
+            sleep 10
+          done
+
+      - name: Run token exchange E2E tests (community KC — fatal)
+        if: success()
+        run: bash .github/scripts/token-exchange/80-run-tests.sh
+        env:
+          KEYCLOAK_PROVIDER: community
+          PLATFORM: kind
+      # ── End Token Exchange E2E ───────────────────────────────────────────
 
       - name: Run UI E2E tests
         if: success()

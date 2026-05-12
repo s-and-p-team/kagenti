@@ -107,7 +107,7 @@ HYPERSHIFT_AUTOMATION_DIR=$(find_hypershift_automation)
 # Configuration with defaults
 REPLICAS="${REPLICAS:-2}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-m5.xlarge}"
-OCP_VERSION="${OCP_VERSION:-4.20.11}"
+OCP_VERSION="${OCP_VERSION:-4.20.21}"
 
 # NodePool autoscaling (enabled by default)
 # Override AUTOSCALE_MIN and AUTOSCALE_MAX to adjust limits, or set to empty to disable
@@ -648,15 +648,14 @@ else
 export KUBECONFIG=$CLUSTER_KUBECONFIG
 oc get nodes
 
-./.github/scripts/kagenti-operator/30-run-installer.sh --env ocp
-./.github/scripts/kagenti-operator/41-wait-crds.sh
+./scripts/ocp/setup-kagenti.sh --kagenti-repo .
 
 ./.github/scripts/kagenti-operator/71-build-weather-tool.sh
 ./.github/scripts/kagenti-operator/72-deploy-weather-tool.sh
 ./.github/scripts/kagenti-operator/74-deploy-weather-agent.sh
 
 export AGENT_URL="https://\$(oc get route -n team1 weather-service -o jsonpath='{.spec.host}')"
-export KAGENTI_CONFIG_FILE=deployments/envs/ocp_values.yaml
+export KAGENTI_CONFIG_FILE=deployments/envs/ocp_ci_values.yaml
 ./.github/scripts/kagenti-operator/90-run-e2e-tests.sh
 
 # ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓

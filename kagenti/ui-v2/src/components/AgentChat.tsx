@@ -89,7 +89,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ namespace, name }) => {
   const [showAgentCard, setShowAgentCard] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const { getToken, user } = useAuth();
+  const { getToken, forceRefreshToken, user } = useAuth();
   const currentUsername = user?.username || 'you';
 
   // Fetch agent card to check capabilities
@@ -147,7 +147,7 @@ export const AgentChat: React.FC<AgentChatProps> = ({ namespace, name }) => {
 
       try {
         // Get auth token if available
-        const token = await getToken();
+        let token = await getToken();
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
         };
@@ -158,18 +158,33 @@ export const AgentChat: React.FC<AgentChatProps> = ({ namespace, name }) => {
         const controller = new AbortController();
         abortControllerRef.current = controller;
 
-        const response = await fetch(
-          `/api/v1/chat/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/stream`,
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              message: messageToSend,
-              session_id: sessionId,
-            }),
-            signal: controller.signal,
+        const streamUrl = `/api/v1/chat/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/stream`;
+        const streamBody = JSON.stringify({
+          message: messageToSend,
+          session_id: sessionId,
+        });
+
+        let response = await fetch(streamUrl, {
+          method: 'POST',
+          headers,
+          body: streamBody,
+          signal: controller.signal,
+        });
+
+        // On 401, force-refresh token and retry once (scope may have been added after login)
+        if (response.status === 401) {
+          await response.body?.cancel();
+          token = await forceRefreshToken();
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+            response = await fetch(streamUrl, {
+              method: 'POST',
+              headers,
+              body: streamBody,
+              signal: controller.signal,
+            });
           }
-        );
+        }
 
         if (!response.ok) {
           throw new Error(`HTTP error: ${response.status}`);
@@ -316,21 +331,26 @@ export const AgentChat: React.FC<AgentChatProps> = ({ namespace, name }) => {
 
   const handleHitlResponse = async (_taskId: string, action: 'approve' | 'deny') => {
     try {
-      const token = await getToken();
+      let token = await getToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
       const message = action === 'approve' ? 'Approved' : 'Denied';
-      await fetch(
-        `/api/v1/chat/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/stream`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ message, session_id: sessionId }),
+      const hitlUrl = `/api/v1/chat/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/stream`;
+      const hitlBody = JSON.stringify({ message, session_id: sessionId });
+
+      let response = await fetch(hitlUrl, { method: 'POST', headers, body: hitlBody });
+
+      if (response.status === 401) {
+        await response.body?.cancel();
+        token = await forceRefreshToken();
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+          response = await fetch(hitlUrl, { method: 'POST', headers, body: hitlBody });
         }
-      );
+      }
     } catch (error) {
       console.error(`[AgentChat] Failed to send HITL ${action}:`, error);
     }

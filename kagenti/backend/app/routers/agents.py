@@ -486,7 +486,7 @@ def _get_job_description(job: dict) -> str:
 
 
 def _is_sandbox_ready(sandbox: dict) -> str:
-    """Check if a Sandbox CR is ready by examining its status conditions."""
+    """Check if a Sandbox is ready by examining its status conditions."""
     status = sandbox.get("status", {})
     conditions = status.get("conditions", [])
     for cond in conditions:
@@ -498,7 +498,7 @@ def _is_sandbox_ready(sandbox: dict) -> str:
 
 
 def _get_sandbox_description(sandbox: dict) -> str:
-    """Extract description from a Sandbox CR."""
+    """Extract description from a Sandbox resource."""
     metadata = sandbox.get("metadata", {})
     annotations = metadata.get("annotations", {})
     return annotations.get(KAGENTI_DESCRIPTION_ANNOTATION, "No description")
@@ -666,9 +666,9 @@ async def list_agents(
                     name = metadata.get("name", "")
                     if name in agent_names:
                         logger.warning(
-                            f"Duplicate agent name '{name}' detected: Sandbox skipped because "
-                            f"a workload with the same name already exists in namespace '{namespace}'. "
-                            "This may indicate a configuration issue."
+                            f"Duplicate agent name '{name}' detected: Sandbox skipped "
+                            f"because a workload with the same name already exists in "
+                            f"namespace '{namespace}'. This may indicate a configuration issue."
                         )
                         continue
                     agent_names.add(name)
@@ -2008,32 +2008,54 @@ def _build_authbridge_runtime_yaml(
     merging in mode and listener addresses at injection time. The Helm chart
     creates an equivalent ConfigMap for pre-declared namespaces
     (see charts/kagenti/templates/agent-namespaces.yaml).
+
+    Emits the per-plugin schema: every plugin-specific setting lives under
+    its own `config:` block inside pipeline.inbound.plugins[] or
+    pipeline.outbound.plugins[]. Plugin-level defaults (audience_file,
+    bypass_paths, identity file paths) are intentionally omitted — the
+    authbridge binary applies them from its own convention layer
+    (see authbridge/authlib/plugins/CONVENTIONS.md). Leaving them out
+    here keeps the backend-generated ConfigMap minimal and the schema
+    source-of-truth in one place.
     """
     identity_type = "spiffe" if spire_enabled else "client-secret"
+    # jwt-validation receives keycloak_url + keycloak_realm so it can
+    # derive jwks_url from the INTERNAL keycloak URL rather than the
+    # public `issuer`. Required for split-horizon deployments where
+    # `issuer` isn't reachable from inside the pod. See
+    # kagenti-extensions#383.
+    # Note: Remember to keep AuthBridgeConfig in kagenti/ui-v2/src/types/index.ts
+    # in sync with this YAML runtime configuration.
     config = {
         "mode": "envoy-sidecar",
-        "inbound": {"issuer": issuer},
-        "outbound": {
-            "keycloak_url": keycloak_url,
-            "keycloak_realm": realm,
-            "default_policy": "passthrough",
-        },
-        "identity": {
-            "type": identity_type,
-            "client_id_file": "/shared/client-id.txt",
-            "client_secret_file": "/shared/client-secret.txt",
-        },
-        "bypass": {
-            "inbound_paths": [
-                "/.well-known/*",
-                "/healthz",
-                "/readyz",
-                "/livez",
-            ]
+        "pipeline": {
+            "inbound": {
+                "plugins": [
+                    {
+                        "name": "jwt-validation",
+                        "config": {
+                            "issuer": issuer,
+                            "keycloak_url": keycloak_url,
+                            "keycloak_realm": realm,
+                        },
+                    }
+                ]
+            },
+            "outbound": {
+                "plugins": [
+                    {
+                        "name": "token-exchange",
+                        "config": {
+                            "keycloak_url": keycloak_url,
+                            "keycloak_realm": realm,
+                            "default_policy": "passthrough",
+                            "identity": {"type": identity_type},
+                        },
+                    }
+                ]
+            },
         },
     }
-    if spire_enabled:
-        config["identity"]["jwt_svid_path"] = "/opt/jwt_svid.token"
 
     return yaml.dump(config, default_flow_style=False)
 
@@ -2840,8 +2862,19 @@ def _build_sandbox_manifest(
     image: str,
     shipwright_build_name: Optional[str] = None,
 ) -> dict:
-    """Build a Sandbox CR manifest for an agent (agents.x-k8s.io/v1alpha1)."""
-    env_vars = _build_env_vars(request)
+    """Build a Sandbox manifest (agents.x-k8s.io/v1alpha1) for direct creation."""
+    # Sandbox controller creates a headless Service with no port translation,
+    # so the container must listen on the same port clients connect to (the
+    # external service port, which is also baked into AGENT_ENDPOINT). For
+    # other workload types the Service port-translates to targetPort, so the
+    # split is fine there.
+    service_port = (
+        request.servicePorts[0].port if request.servicePorts else DEFAULT_OFF_CLUSTER_PORT
+    )
+    env_vars = [
+        {"name": "PORT", "value": str(service_port)} if ev.get("name") == "PORT" else ev
+        for ev in _build_env_vars(request)
+    ]
     labels = _build_common_labels(request, WORKLOAD_TYPE_SANDBOX)
 
     annotations: Dict[str, str] = {
@@ -2850,9 +2883,7 @@ def _build_sandbox_manifest(
     if shipwright_build_name:
         annotations["kagenti.io/shipwright-build"] = shipwright_build_name
 
-    container_port = DEFAULT_IN_CLUSTER_PORT
-    if request.servicePorts and len(request.servicePorts) > 0:
-        container_port = request.servicePorts[0].targetPort
+    container_port = service_port
 
     manifest = {
         "apiVersion": f"{AGENT_SANDBOX_CRD_GROUP}/{AGENT_SANDBOX_CRD_VERSION}",
@@ -2864,6 +2895,7 @@ def _build_sandbox_manifest(
             "annotations": annotations,
         },
         "spec": {
+            "replicas": 1,
             "podTemplate": {
                 "metadata": {
                     "labels": {
@@ -2872,6 +2904,7 @@ def _build_sandbox_manifest(
                     "annotations": _build_common_annotations(request),
                 },
                 "spec": {
+                    "automountServiceAccountToken": False,
                     "serviceAccountName": request.name,
                     "containers": [
                         {
@@ -3031,13 +3064,13 @@ async def create_agent(
                 )
                 logger.info(f"Created Job '{request.name}' in namespace '{request.namespace}'")
             elif request.workloadType == WORKLOAD_TYPE_SANDBOX:
-                workload_manifest = _build_sandbox_manifest(
+                sandbox_manifest = _build_sandbox_manifest(
                     request=request,
                     image=request.containerImage,
                 )
                 kube.create_sandbox(
                     namespace=request.namespace,
-                    body=workload_manifest,
+                    body=sandbox_manifest,
                 )
                 logger.info(f"Created Sandbox '{request.name}' in namespace '{request.namespace}'")
 
@@ -3150,7 +3183,12 @@ async def create_agent(
         if e.status == 404:
             raise HTTPException(
                 status_code=404,
-                detail="Agent CRD not found. Is the kagenti-operator installed?",
+                detail=(
+                    f"Required CRD or resource not found for workload type "
+                    f"'{request.workloadType}'. Ensure the necessary controllers "
+                    f"are installed (e.g. Shipwright for source builds, "
+                    f"agent-sandbox controller for sandbox workloads)."
+                ),
             )
         logger.error(f"Failed to create agent: {e}")
         raise HTTPException(status_code=e.status, detail=str(e.reason))
@@ -3554,7 +3592,7 @@ async def finalize_shipwright_build(
                 f"Created Job '{name}' with image '{container_image}' in namespace '{namespace}'"
             )
         elif final_workload_type == WORKLOAD_TYPE_SANDBOX:
-            workload_manifest = _build_sandbox_manifest(
+            sandbox_manifest = _build_sandbox_manifest(
                 request=agent_request,
                 image=container_image,
                 shipwright_build_name=name,
@@ -3562,14 +3600,11 @@ async def finalize_shipwright_build(
             kagenti_build_labels = {
                 k: v for k, v in build_labels.items() if k.startswith(settings.kagenti_label_prefix)
             }
-            workload_manifest["metadata"]["labels"].update(kagenti_build_labels)
-            workload_manifest["spec"]["podTemplate"]["metadata"]["labels"].update(
+            sandbox_manifest["metadata"]["labels"].update(kagenti_build_labels)
+            sandbox_manifest["spec"]["podTemplate"]["metadata"]["labels"].update(
                 kagenti_build_labels
             )
-            kube.create_sandbox(
-                namespace=namespace,
-                body=workload_manifest,
-            )
+            kube.create_sandbox(namespace=namespace, body=sandbox_manifest)
             logger.info(f"Created Sandbox '{name}' in namespace '{namespace}' from build")
 
         # Create Service (not needed for Jobs or Sandboxes)
@@ -3863,3 +3898,125 @@ async def fetch_env_from_url(request: FetchEnvUrlRequest) -> FetchEnvUrlResponse
     except Exception as e:
         logger.error(f"Unexpected error fetching URL {request.url}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+if settings.kagenti_feature_flag_authbridge_api:
+
+    @router.get(
+        "/{namespace}/{name}/identity-config", dependencies=[Depends(require_roles(ROLE_OPERATOR))]
+    )
+    async def get_agent_identity_config(
+        namespace: str,
+        name: str,
+        kube: KubernetesService = Depends(get_kubernetes_service),
+    ) -> dict:
+        """
+        Fetch the AuthBridge configuration for an Agent.
+        """
+
+        namespace = sanitize_log(namespace)
+        name = sanitize_log(name)
+
+        try:
+            addresses = _get_service_endpoints(kube=kube, namespace=namespace, name=name)
+        except ApiException as e:
+            raise HTTPException(status_code=502, detail=e.reason)
+
+        attempts = 0
+        for address in addresses:
+            attempts += 1
+            # AuthBridge serves config and status on port 9093
+            url = f"http://{address}:9093/config"
+            try:
+                data = await _fetch_authbridge_json(url)
+                data["AuthBridge"] = True
+                return data
+            except Exception:
+                # It isn't an error for an endpoint to be unreachable, only for all pods to be unreachable
+                logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
+
+        if attempts == 0:
+            raise HTTPException(status_code=404, detail=f"{name} not found")
+
+        logger.info("Could not invoke any AuthBridge endpoints for %s/%s", namespace, name)
+        # We return HTTP 200 if no pods respond - this might be a valid agent w/o AuthBridge
+        return {"AuthBridge": False}
+
+    @router.get(
+        "/{namespace}/{name}/identity-status", dependencies=[Depends(require_roles(ROLE_OPERATOR))]
+    )
+    async def get_agent_identity_status(
+        namespace: str,
+        name: str,
+        kube: KubernetesService = Depends(get_kubernetes_service),
+    ) -> dict:
+        """
+        Fetch the AuthBridge statistics and status for an Agent.
+        """
+
+        namespace = sanitize_log(namespace)
+        name = sanitize_log(name)
+
+        try:
+            addresses = _get_service_endpoints(kube=kube, namespace=namespace, name=name)
+        except ApiException as e:
+            raise HTTPException(status_code=502, detail=e.reason)
+
+        attempts = 0
+        for address in addresses:
+            attempts += 1
+            # AuthBridge serves config and status on port 9093
+            url = f"http://{address}:9093/stats"
+            try:
+                data = await _fetch_authbridge_json(url)
+                data["AuthBridge"] = True
+                return data
+            except Exception:
+                # It isn't an error for an endpoint to be unreachable, only for all pods to be unreachable
+                logger.info("Failed to talk to url %s; skipping", url, exc_info=True)
+
+        if attempts == 0:
+            raise HTTPException(status_code=404, detail=f"{name} not found")
+
+        logger.info("Could not invoke any AuthBridge endpoints for %s/%s", namespace, name)
+        # We return HTTP 200 if no pods respond - this might be a valid agent w/o AuthBridge
+        return {"AuthBridge": False}
+
+
+def _get_service_endpoints(kube: KubernetesService, namespace: str, name: str) -> List[str]:
+    """
+    Get addresses for a K8s service
+    """
+
+    addresses: list[str] = []
+    endpoint_slices = kube.get_endpoint_slices(namespace=namespace, name=name)
+
+    for endpoint_slice in endpoint_slices.get("items", []):
+        for endpoint in endpoint_slice.get("endpoints", []):
+            for address in endpoint.get("addresses", []):
+                addresses.append(address)
+
+    return addresses
+
+
+async def _fetch_authbridge_json(url: str) -> dict:
+    """
+    Fetch JSON from an AuthBridge sidecar endpoint.
+
+    Raises on HTTP errors, oversized responses, or non-dict payloads.
+    """
+
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        logger.debug("Making HTTP request to %s", url)
+        response = await client.get(url)
+        response.raise_for_status()
+
+        content = response.text
+        if len(content) > 1024 * 1024:
+            raise HTTPException(status_code=502, detail="File content too large (max 1MB)")
+
+        data = json.loads(content)
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=502, detail="File content not AuthBridge JSON")
+
+        return data
