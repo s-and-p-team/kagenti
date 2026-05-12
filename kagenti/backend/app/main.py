@@ -85,6 +85,17 @@ if settings.kagenti_feature_flag_integrations:
         logging.getLogger(__name__).warning(
             "INTEGRATIONS flag enabled but integration modules not installed — skipping"
         )
+
+_lineage_modules_loaded = False
+if settings.kagenti_feature_flag_lineage:
+    try:
+        from app.routers import lineage  # noqa: E402
+
+        _lineage_modules_loaded = True
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "LINEAGE flag enabled but lineage module not installed — skipping"
+        )
 # pylint: enable=wrong-import-position,no-name-in-module,import-error
 
 # Configure logging
@@ -190,6 +201,10 @@ if _triggers_modules_loaded:
 if _integrations_modules_loaded:
     app.include_router(integrations.router, prefix="/api/v1")
     logger.info("Feature flag INTEGRATIONS enabled — integration routes registered")
+
+if _lineage_modules_loaded:
+    app.include_router(lineage.router, prefix="/api/v1")
+    logger.info("Feature flag LINEAGE enabled — lineage routes registered")
 # pylint: enable=used-before-assignment
 
 

@@ -132,6 +132,12 @@ spec:
               value: "{{ .Values.featureFlags.triggers }}"
             - name: KAGENTI_FEATURE_FLAG_AGENT_SANDBOX
               value: "{{ .Values.featureFlags.agentSandbox }}"
+            - name: KAGENTI_FEATURE_FLAG_LINEAGE
+              value: "{{ .Values.featureFlags.lineage }}"
+            {{- if .Values.featureFlags.lineage }}
+            - name: LINEAGE_SERVICE_URL
+              value: "http://lineage-service.kagenti-system.svc.cluster.local:8000"
+            {{- end }}
             - name: KEYCLOAK_URL
               value: {{ .Values.keycloak.url | quote }}
             - name: KEYCLOAK_PUBLIC_URL

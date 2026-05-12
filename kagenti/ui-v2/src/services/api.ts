@@ -134,6 +134,9 @@ async function apiFetch<T>(
     );
   }
 
+  if (response.status === 204) {
+    return undefined as unknown as T;
+  }
   return response.json();
 }
 
@@ -1448,3 +1451,83 @@ export async function getPodEvents(
     `/sandbox/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(agentName)}/events`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Data Lineage service
+// ---------------------------------------------------------------------------
+
+import type { CommonEdge, Hop, PrincipalAgents, PrincipalPath, Run, TimeRange } from '@/types/lineage';
+
+function sinceParam(timeRange: TimeRange): string | undefined {
+  if (timeRange === 'all') return undefined;
+  const ms = { '1h': 3600_000, '24h': 86400_000, '7d': 604800_000 }[timeRange];
+  return new Date(Date.now() - ms).toISOString();
+}
+
+export const lineageService = {
+  listRuns(params: {
+    username?: string;
+    agent?: string;
+    tool?: string;
+    timeRange?: TimeRange;
+    limit?: number;
+  } = {}): Promise<Run[]> {
+    const q = new URLSearchParams();
+    if (params.username) q.set('username', params.username);
+    if (params.agent) q.set('agent', params.agent);
+    if (params.tool) q.set('tool', params.tool);
+    if (params.timeRange) {
+      const since = sinceParam(params.timeRange);
+      if (since) q.set('since', since);
+    }
+    if (params.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return apiFetch<Run[]>(`/lineage/runs${qs ? `?${qs}` : ''}`);
+  },
+
+  getTrajectory(runId: string): Promise<Hop[]> {
+    return apiFetch<Hop[]>(`/lineage/runs/${encodeURIComponent(runId)}/trajectory`);
+  },
+
+  getPrincipalAgents(principalId: string): Promise<PrincipalAgents> {
+    return apiFetch<PrincipalAgents>(`/lineage/principals/${encodeURIComponent(principalId)}/agents`);
+  },
+
+  getCommonEdges(params: { hopKind?: string; limit?: number } = {}): Promise<CommonEdge[]> {
+    const q = new URLSearchParams();
+    if (params.hopKind) q.set('hop_kind', params.hopKind);
+    if (params.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return apiFetch<CommonEdge[]>(`/lineage/edges/common${qs ? `?${qs}` : ''}`);
+  },
+
+  getPaths(agent: string, tool: string): Promise<PrincipalPath[]> {
+    const q = new URLSearchParams({ agent, tool });
+    return apiFetch<PrincipalPath[]>(`/lineage/paths?${q}`);
+  },
+
+  deleteRun(runId: string): Promise<void> {
+    return apiFetch<void>(`/lineage/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' });
+  },
+
+  deleteAllRuns(): Promise<{ runs_deleted: number; hops_deleted: number }> {
+    return apiFetch<{ runs_deleted: number; hops_deleted: number }>(
+      '/lineage/runs?confirm=true',
+      { method: 'DELETE' },
+    );
+  },
+
+  autocompleteAgents(prefix?: string): Promise<string[]> {
+    const q = new URLSearchParams();
+    if (prefix) q.set('prefix', prefix);
+    q.set('limit', '30');
+    return apiFetch<string[]>(`/lineage/autocomplete/agents?${q}`);
+  },
+
+  autocompleteTools(prefix?: string): Promise<string[]> {
+    const q = new URLSearchParams();
+    if (prefix) q.set('prefix', prefix);
+    q.set('limit', '30');
+    return apiFetch<string[]>(`/lineage/autocomplete/tools?${q}`);
+  },
+};

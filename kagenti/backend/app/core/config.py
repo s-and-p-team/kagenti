@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     kagenti_feature_flag_sidecars: bool = (
         False  # sidecar agents (looper, hallucination, context guardian)
     )
+    kagenti_feature_flag_lineage: bool = False  # Data lineage / trust provenance UI
 
     # Label settings
     kagenti_label_prefix: str = "kagenti.io/"
@@ -84,6 +85,7 @@ class Settings(BaseSettings):
     enabled_namespace_label_value: str = "true"
 
     # External service URLs (read from ConfigMap via environment variables)
+    lineage_service_url: str = "http://lineage-service.kagenti-system.svc.cluster.local:8000"
     traces_dashboard_url: str = ""
     network_dashboard_url: str = ""
     mlflow_dashboard_url: str = ""

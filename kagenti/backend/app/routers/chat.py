@@ -192,8 +192,14 @@ async def send_message(
             content = ""
             if "result" in result:
                 result_data = result["result"]
-                # Handle Task response
-                if "status" in result_data and "message" in result_data.get("status", {}):
+                # Handle artifacts response (A2A Task with artifacts)
+                if "artifacts" in result_data:
+                    for artifact in result_data["artifacts"]:
+                        for part in artifact.get("parts", []):
+                            if isinstance(part, dict) and "text" in part:
+                                content += part["text"]
+                # Handle Task status.message response
+                elif "status" in result_data and "message" in result_data.get("status", {}):
                     parts = result_data["status"]["message"].get("parts", [])
                     for part in parts:
                         if isinstance(part, dict) and "text" in part:

@@ -223,6 +223,17 @@ data:
                       cluster: original_destination
                       timeout: 300s
               http_filters:
+              # Lua filter injects x-authbridge-direction BEFORE ext_proc runs.
+              # Route-level request_headers_to_add does not work because the
+              # router filter runs after ext_proc.
+              - name: envoy.filters.http.lua
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+                  inline_code: |
+                    function envoy_on_request(request_handle)
+                      request_handle:headers():add("x-authbridge-direction", "outbound")
+                      request_handle:headers():add("x-telemetry-direction", "outbound")
+                    end
               - name: envoy.filters.http.ext_proc
                 typed_config:
                   "@type": type.googleapis.com/envoy.extensions.filters.http.ext_proc.v3.ExternalProcessor

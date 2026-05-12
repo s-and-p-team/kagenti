@@ -11,6 +11,7 @@ featureFlags:
   integrations: false
   triggers: false
   agentSandbox: false
+  lineage: false  # Data lineage / trust provenance UI (requires lineage service deployed)
 
 # ------------------------------------------------------------------
 #  Control Panel: Enable or disable components here
