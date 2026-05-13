@@ -48,6 +48,8 @@ spec:
     metadata:
       labels:
         app: otel-collector
+      annotations:
+        checksum/config: {{ include "kagenti.otel.collectorConfig" . | sha256sum }}
     spec:
       serviceAccountName: otel-collector
       containers:
