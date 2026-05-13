@@ -293,6 +293,37 @@ if [ "${KAGENTI_DEP_BUILDS:-}" != "[]" ] && [ "$RUN_INSTALL" = "true" ]; then
 fi
 
 # ============================================================================
+# PHASE 2b2: Build telemetry-sidecar branch images from sibling repos
+# authbridge-unified: Envoy + authbridge + telemetry-processor (3-in-1 sidecar)
+# lineage-service:   FastAPI OTLP receiver + Postgres writer
+# Both are built locally — no published registry image for the feature branch.
+# Non-fatal if sibling repo not found.
+# ============================================================================
+if [ "$RUN_INSTALL" = "true" ] && [ "${IS_OPENSHIFT:-false}" != "true" ]; then
+    AB_DOCKERFILE="$REPO_ROOT/../kagenti-extensions/authbridge/cmd/authbridge/Dockerfile"
+    AB_CONTEXT="$REPO_ROOT/../kagenti-extensions/authbridge"
+    if [ -f "$AB_DOCKERFILE" ]; then
+        log_step "Building authbridge-unified:latest from sibling kagenti-extensions repo..."
+        docker build -f "$AB_DOCKERFILE" -t "localhost/authbridge-unified:latest" "$AB_CONTEXT" \
+            && docker tag "localhost/authbridge-unified:latest" "authbridge-unified:latest" \
+            && log_step "authbridge-unified:latest built" \
+            || log_step "WARNING: authbridge-unified build failed — sidecar pods will use cached image if present"
+    else
+        log_step "Skipping authbridge-unified build (../kagenti-extensions not found)"
+    fi
+
+    LINEAGE_CONTEXT="$REPO_ROOT/../data_lineage/lineage_service"
+    if [ -d "$LINEAGE_CONTEXT" ]; then
+        log_step "Building localhost/lineage-service:latest from sibling data_lineage repo..."
+        docker build -t "localhost/lineage-service:latest" "$LINEAGE_CONTEXT" \
+            && log_step "lineage-service:latest built" \
+            || log_step "WARNING: lineage-service build failed — lineage pod will use cached image if present"
+    else
+        log_step "Skipping lineage-service build (../data_lineage not found)"
+    fi
+fi
+
+# ============================================================================
 # PHASE 2c: Load local bare-name sidecar images into Kind
 # Some sidecar images (e.g., authbridge-unified) are built locally and
 # referenced by bare image names that Kind cannot pull from a public registry.
