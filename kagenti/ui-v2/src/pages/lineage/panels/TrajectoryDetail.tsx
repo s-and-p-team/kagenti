@@ -621,7 +621,7 @@ export const TrajectoryDetail: React.FC<Props> = ({ run, onBack }) => {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
         <Button variant="link" onClick={onBack}>← Back to runs</Button>
         <Title headingLevel="h4" size="md">
-          {run.principal_id} · {run.hop_count} hop{run.hop_count !== 1 ? 's' : ''} · {new Date(run.started_at).toLocaleString()}
+          {run.username ?? run.principal_id} · {run.hop_count} hop{run.hop_count !== 1 ? 's' : ''} · {new Date(run.started_at).toLocaleString()}
         </Title>
       </div>
 
