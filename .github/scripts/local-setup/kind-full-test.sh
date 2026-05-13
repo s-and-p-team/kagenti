@@ -327,6 +327,16 @@ fi
 LINEAGE_DEPLOY_SCRIPT="$REPO_ROOT/../data_lineage/lineage_service/manifests/deploy.sh"
 if [ "$RUN_INSTALL" = "true" ] && [ -f "$LINEAGE_DEPLOY_SCRIPT" ]; then
     log_phase "PHASE 2d: Deploy Lineage Service"
+    # Load lineage-service image into Kind if built locally
+    CLUSTER_NAME="${KIND_CLUSTER_NAME:-kagenti}"
+    if docker images "localhost/lineage-service:latest" --format '{{.ID}}' 2>/dev/null | grep -q .; then
+        log_step "Loading localhost/lineage-service:latest into Kind..."
+        kind load docker-image "localhost/lineage-service:latest" --name "${CLUSTER_NAME}" 2>/dev/null || true
+        log_step "lineage-service:latest ready in Kind"
+    else
+        log_step "WARNING: localhost/lineage-service:latest not found — lineage pod will fail to start."
+        log_step "  Build it first: cd data_lineage && docker build -t localhost/lineage-service:latest lineage_service/"
+    fi
     log_step "Running lineage service deploy from sibling data_lineage repo..."
     # deploy.sh expects CWD = kagenti repo root (chart path, kubectl contexts)
     bash "$LINEAGE_DEPLOY_SCRIPT"
