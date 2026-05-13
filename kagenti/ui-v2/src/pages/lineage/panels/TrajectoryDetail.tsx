@@ -54,12 +54,14 @@ const NODE_LABEL: Record<string, string> = {
 };
 
 // ─── Column layout ──────────────────────────────────────────────────────────
+// LLM and tool share the same x column so all agent→{llm,tool} edges fan out
+// cleanly without passing through each other's nodes.
 
 const COL_X: Record<string, number> = {
   source: 80,
   agent:  300,
   llm:    520,
-  tool:   740,
+  tool:   520,
 };
 const NODE_W = 160;
 const NODE_H = 48;
@@ -113,12 +115,25 @@ function buildGraph(hops: Hop[]): { nodes: Node[]; edges: Edge[] } {
   for (const [id, t] of nodeTypes) byCol[t].push(id);
 
   const nodes: Node[] = [];
-  for (const [col, ids] of Object.entries(byCol)) {
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
+  // source and agent columns get independent y counters.
+  // llm and tool share COL_X['llm'] and are stacked sequentially so that
+  // all agent→{llm,tool} edges fan out from the same x without crossing.
+  let sharedY = 0;
+  for (const col of ['source', 'agent'] as const) {
+    for (let i = 0; i < byCol[col].length; i++) {
+      nodes.push({
+        id: byCol[col][i],
+        position: { x: COL_X[col] - NODE_W / 2, y: i * VERT_GAP },
+        data: { label: byCol[col][i], nodeType: col, hops: hopIdx.get(byCol[col][i]) ?? [] },
+        type: 'serviceNode',
+      });
+    }
+  }
+  for (const col of ['llm', 'tool'] as const) {
+    for (const id of byCol[col]) {
       nodes.push({
         id,
-        position: { x: COL_X[col] - NODE_W / 2, y: i * VERT_GAP },
+        position: { x: COL_X[col] - NODE_W / 2, y: sharedY++ * VERT_GAP },
         data: { label: id, nodeType: col, hops: hopIdx.get(id) ?? [] },
         type: 'serviceNode',
       });
