@@ -70,6 +70,7 @@ const FLAG_LABELS: Record<DisplayedFlag, string> = {
   sandbox: 'Sandbox',
   integrations: 'Integrations',
   triggers: 'Triggers',
+  lineage: 'Lineage',
   agentSandbox: 'Agent Sandbox',
   skills: 'Skills',
   authbridgeAPI: 'AuthBridge API',

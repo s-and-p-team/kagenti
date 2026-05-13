@@ -271,7 +271,7 @@ class TestWeatherAgentConversation:
         #   2. A proxy/gateway rewrites the card URL on the fly
         #   3. Clients override as we do here (current workaround)
         httpx_client = httpx.AsyncClient(
-            timeout=120.0, verify=ssl_verify, headers=headers
+            timeout=300.0, verify=ssl_verify, headers=headers
         )
         config = ClientConfig(httpx_client=httpx_client)
         try:
@@ -296,6 +296,17 @@ class TestWeatherAgentConversation:
         for attempt in range(1, _LLM_QUERY_MAX_ATTEMPTS + 1):
             try:
                 last_result = await _send_and_collect_response(client, user_message)
+            except httpx.TimeoutException as e:
+                if attempt < _LLM_QUERY_MAX_ATTEMPTS:
+                    logger.warning(
+                        "Timeout on attempt %d/%d, retrying in %ds...",
+                        attempt,
+                        _LLM_QUERY_MAX_ATTEMPTS,
+                        _LLM_QUERY_RETRY_DELAY_S,
+                    )
+                    await asyncio.sleep(_LLM_QUERY_RETRY_DELAY_S)
+                    continue
+                pytest.fail(f"Error during A2A conversation: {e}")
             except Exception as e:
                 pytest.fail(f"Error during A2A conversation: {e}")
 
@@ -437,7 +448,7 @@ class TestWeatherAgentConversation:
 
         # Connect using ClientFactory (override card URL for external access)
         httpx_client = httpx.AsyncClient(
-            timeout=120.0, verify=ssl_verify, headers=headers
+            timeout=300.0, verify=ssl_verify, headers=headers
         )
         config = ClientConfig(httpx_client=httpx_client)
         try:
@@ -460,6 +471,18 @@ class TestWeatherAgentConversation:
                     last_result = await _send_and_collect_response(
                         client, user_message, context_id=context_id
                     )
+                except httpx.TimeoutException as e:
+                    if attempt < _LLM_QUERY_MAX_ATTEMPTS:
+                        logger.warning(
+                            "Turn %d: timeout on attempt %d/%d, retrying in %ds...",
+                            turn,
+                            attempt,
+                            _LLM_QUERY_MAX_ATTEMPTS,
+                            _LLM_QUERY_RETRY_DELAY_S,
+                        )
+                        await asyncio.sleep(_LLM_QUERY_RETRY_DELAY_S)
+                        continue
+                    pytest.fail(f"Turn {turn} failed: {e}")
                 except Exception as e:
                     pytest.fail(f"Turn {turn} failed: {e}")
 

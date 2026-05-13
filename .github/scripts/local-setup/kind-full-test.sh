@@ -418,6 +418,12 @@ if [ "$RUN_TEST" = "true" ]; then
     export KAGENTI_CONFIG_FILE="${KAGENTI_CONFIG_FILE:-deployments/envs/${KAGENTI_ENV}_values.yaml}"
     log_step "KAGENTI_CONFIG_FILE: $KAGENTI_CONFIG_FILE"
 
+    # Source local env file produced by 85-start-port-forward.sh (exports don't propagate from subshells)
+    if [ -f /tmp/kagenti-local-env.sh ]; then
+        # shellcheck source=/dev/null
+        source /tmp/kagenti-local-env.sh
+    fi
+
     log_step "Running E2E tests..."
     ./.github/scripts/kagenti-operator/90-run-e2e-tests.sh
 else

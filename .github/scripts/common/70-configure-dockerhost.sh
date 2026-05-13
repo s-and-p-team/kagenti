@@ -6,8 +6,23 @@ source "$SCRIPT_DIR/../lib/logging.sh"
 
 log_step "70" "Configuring dockerhost service"
 
-# Get Docker host IP (filter for IPv4 — EndpointSlice requires addressType: IPv4)
-DOCKER_HOST_IP=$(docker network inspect kind | jq -r '.[].IPAM.Config[] | select(.Gateway != null) | .Gateway' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+# Get Docker host IP that pods use to reach the macOS host.
+# Priority:
+#  1. host.docker.internal from the Kind node's /etc/hosts — this is the
+#     IP Podman Desktop injects so containers can reach the macOS host; it
+#     is the same IP that pods resolve when they call host.docker.internal.
+#  2. Fallback: gateway from docker network inspect (works for plain Docker).
+DOCKER_HOST_IP=$(docker exec kagenti-control-plane grep -m1 'host\.docker\.internal' /etc/hosts 2>/dev/null \
+    | awk '{print $1}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || true)
+
+if [ -z "$DOCKER_HOST_IP" ]; then
+    log_info "host.docker.internal not in Kind node /etc/hosts, falling back to network gateway"
+    DOCKER_HOST_IP=$(docker network inspect kind | jq -r '
+      .[0] |
+      ((.IPAM.Config // []) | .[] | select(.Gateway != null) | .Gateway),
+      ((.subnets // []) | .[] | select(.gateway != null) | .gateway)
+    ' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+fi
 
 if [ -z "$DOCKER_HOST_IP" ] || [ "$DOCKER_HOST_IP" = "null" ]; then
     log_error "Could not determine Docker host IP"

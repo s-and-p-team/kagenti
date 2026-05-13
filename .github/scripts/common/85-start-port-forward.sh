@@ -6,6 +6,11 @@ source "$SCRIPT_DIR/../lib/logging.sh"
 
 log_step "85" "Starting port-forward"
 
+# Local env file mirrors $GITHUB_ENV for non-CI runs (subprocess exports don't propagate)
+LOCAL_ENV_FILE="/tmp/kagenti-local-env.sh"
+# Reset file so stale values from previous runs don't persist
+[ "$IS_CI" = false ] && : > "$LOCAL_ENV_FILE"
+
 # ============================================================================
 # Port-forward weather-service (agent) to localhost:8000
 # ============================================================================
@@ -36,6 +41,10 @@ if [ "$IS_CI" = true ]; then
     echo "AGENT_PORT_FORWARD_PID=$AGENT_PORT_FORWARD_PID" >> $GITHUB_ENV
 else
     echo $AGENT_PORT_FORWARD_PID > /tmp/port-forward-agent.pid
+    # On Podman/macOS the IPv4 port-forward tunnel drops POST responses;
+    # IPv6 loopback works correctly. Force AGENT_URL to use [::1].
+    export AGENT_URL="http://[::1]:8000"
+    echo "export AGENT_URL=http://[::1]:8000" >> "$LOCAL_ENV_FILE"
 fi
 
 # Wait for port-forward to be ready (AuthBridge sidecars need time to initialize)
@@ -70,6 +79,7 @@ if [ "$IS_CI" = true ]; then
 else
     echo $KEYCLOAK_PORT_FORWARD_PID > /tmp/port-forward-keycloak.pid
     export KEYCLOAK_URL="http://localhost:8081"
+    echo "export KEYCLOAK_URL=http://localhost:8081" >> "$LOCAL_ENV_FILE"
 fi
 
 # Wait for Keycloak port-forward to be ready
@@ -130,6 +140,7 @@ if kubectl get svc -n kagenti-system mlflow >/dev/null 2>&1; then
     else
         echo $MLFLOW_PORT_FORWARD_PID > /tmp/port-forward-mlflow.pid
         export MLFLOW_URL="http://localhost:5000"
+        echo "export MLFLOW_URL=http://localhost:5000" >> "$LOCAL_ENV_FILE"
     fi
 
     # Wait for MLflow port-forward to be ready

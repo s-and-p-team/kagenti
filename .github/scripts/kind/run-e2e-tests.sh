@@ -74,6 +74,12 @@ echo -e "${BLUE}[2/${TOTAL_STEPS}] Starting port-forward...${NC}"
 bash .github/scripts/common/85-start-port-forward.sh
 echo ""
 
+# Source local env file produced by 85-start-port-forward.sh (exports don't propagate from subshells)
+if [ -f /tmp/kagenti-local-env.sh ]; then
+    # shellcheck source=/dev/null
+    source /tmp/kagenti-local-env.sh
+fi
+
 # Step 3: Run E2E tests (wave 90)
 echo -e "${BLUE}[3/${TOTAL_STEPS}] Running E2E tests (pytest)...${NC}"
 echo ""
