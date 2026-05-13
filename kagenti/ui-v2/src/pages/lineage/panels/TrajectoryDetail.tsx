@@ -114,39 +114,60 @@ function buildGraph(hops: Hop[]): { nodes: Node[]; edges: Edge[] } {
   const byCol: Record<string, string[]> = { source: [], agent: [], llm: [], tool: [] };
   for (const [id, t] of nodeTypes) byCol[t].push(id);
 
-  const nodes: Node[] = [];
-  // source and agent columns get independent y counters.
-  // llm and tool share COL_X['llm'] and are stacked sequentially so that
-  // all agent→{llm,tool} edges fan out from the same x without crossing.
-  let sharedY = 0;
-  for (const col of ['source', 'agent'] as const) {
-    for (let i = 0; i < byCol[col].length; i++) {
-      nodes.push({
-        id: byCol[col][i],
-        position: { x: COL_X[col] - NODE_W / 2, y: i * VERT_GAP },
-        data: { label: byCol[col][i], nodeType: col, hops: hopIdx.get(byCol[col][i]) ?? [] },
-        type: 'serviceNode',
-      });
-    }
-  }
+  // Step 1: Assign y to leaf nodes (llm + tool), stacked in one column.
+  const nodeY = new Map<string, number>();
+  let leafRow = 0;
   for (const col of ['llm', 'tool'] as const) {
-    for (const id of byCol[col]) {
-      nodes.push({
-        id,
-        position: { x: COL_X[col] - NODE_W / 2, y: sharedY++ * VERT_GAP },
-        data: { label: id, nodeType: col, hops: hopIdx.get(id) ?? [] },
-        type: 'serviceNode',
-      });
-    }
+    for (const id of byCol[col]) nodeY.set(id, leafRow++ * VERT_GAP);
   }
 
-  const edges: Edge[] = hops.map((h, i) => ({
-    id:     `hop-${i}`,
-    source:  h.caller_id ?? '__root__',
-    target:  h.target_id,
-    data: { hop: h },
-    style: { stroke: HOP_COLORS[h.hop_kind] ?? '#888', strokeWidth: 3 },
-    // No label — color encodes the kind
+  // Step 2: Center each agent over the midpoint of its targets' y positions
+  // so edges fan out symmetrically without passing through sibling nodes.
+  for (const agentId of byCol['agent']) {
+    const ys = hops
+      .filter(h => h.caller_id === agentId)
+      .map(h => nodeY.get(h.target_id))
+      .filter((y): y is number => y !== undefined);
+    nodeY.set(agentId, ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0);
+  }
+
+  // Step 3: Center each source over its agents (same logic, one level back).
+  for (const srcId of byCol['source']) {
+    const ys = hops
+      .filter(h => h.caller_id === srcId)
+      .map(h => nodeY.get(h.target_id))
+      .filter((y): y is number => y !== undefined);
+    nodeY.set(srcId, ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0);
+  }
+
+  const nodes: Node[] = [...nodeTypes.keys()].map(id => ({
+    id,
+    position: { x: COL_X[nodeTypes.get(id)!] - NODE_W / 2, y: nodeY.get(id) ?? 0 },
+    data: { label: id, nodeType: nodeTypes.get(id)!, hops: hopIdx.get(id) ?? [] },
+    type: 'serviceNode',
+  }));
+
+  // Deduplicate edges: one topology edge per unique (caller, target) pair.
+  // Multiple hops to the same target (e.g. two LLM calls) collapse into one
+  // edge with a ×N label so the graph shows structure, not call frequency.
+  const edgeMap = new Map<string, { hop: Hop; count: number }>();
+  for (const h of hops) {
+    const key = `${h.caller_id ?? '__root__'}\0${h.target_id}`;
+    const existing = edgeMap.get(key);
+    if (!existing) edgeMap.set(key, { hop: h, count: 1 });
+    else           existing.count++;
+  }
+
+  const edges: Edge[] = [...edgeMap.values()].map(({ hop, count }, i) => ({
+    id:     `edge-${i}`,
+    source:  hop.caller_id ?? '__root__',
+    target:  hop.target_id,
+    type:   'smoothstep',
+    data: { hop },
+    label:  count > 1 ? `×${count}` : undefined,
+    labelStyle: { fill: '#aaa', fontSize: 11 },
+    labelBgStyle: { fill: 'transparent' },
+    style: { stroke: HOP_COLORS[hop.hop_kind] ?? '#888', strokeWidth: 3 },
   }));
 
   return { nodes, edges };
