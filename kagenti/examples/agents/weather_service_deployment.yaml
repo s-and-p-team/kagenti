@@ -35,7 +35,7 @@ spec:
       containers:
       - name: agent
         image: ghcr.io/kagenti/agent-examples/weather_service:latest
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         env:
         - name: PORT
           value: "8000"

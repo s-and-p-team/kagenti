@@ -84,7 +84,29 @@ if [ "$IS_OPENSHIFT" = "true" ] && kubectl get crd builds.shipwright.io &>/dev/n
 
     log_success "BuildRun completed successfully"
 else
-    log_info "Shipwright not available — using ghcr.io image"
+    # Kind path: build from local source if available, so fork fixes are included
+    # without requiring a published image. Falls back to ghcr.io pull if source
+    # is not present (e.g. CI environments that only clone the kagenti repo).
+    WEATHER_SRC="$REPO_ROOT/../agent-examples/a2a/weather_service"
+    IMAGE_TAG="ghcr.io/kagenti/agent-examples/weather_service:latest"
+
+    if [ -f "$WEATHER_SRC/Dockerfile" ] && command -v docker &>/dev/null; then
+        log_info "Building weather-service image from local source..."
+        docker build -t "$IMAGE_TAG" "$WEATHER_SRC" > /tmp/weather-service-build.log 2>&1 && \
+            log_success "Image built: $IMAGE_TAG" || {
+            log_warn "Local build failed (see /tmp/weather-service-build.log) — falling back to ghcr.io pull"
+        }
+
+        CLUSTER_NAME="${KIND_CLUSTER_NAME:-kagenti}"
+        if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
+            log_info "Loading image into Kind cluster '${CLUSTER_NAME}'..."
+            kind load docker-image "$IMAGE_TAG" --name "$CLUSTER_NAME" >> /tmp/weather-service-build.log 2>&1 && \
+                log_success "Image loaded into Kind" || \
+                log_warn "kind load failed — pods will pull from ghcr.io instead"
+        fi
+    else
+        log_info "Local source not found — using ghcr.io image"
+    fi
 fi
 
 # ============================================================================
