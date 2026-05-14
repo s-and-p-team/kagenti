@@ -34,7 +34,7 @@ spec:
       serviceAccountName: weather-service
       containers:
       - name: agent
-        image: ghcr.io/kagenti/agent-examples/weather_service:latest
+        image: ghcr.io/s-and-p-team/agent-examples/weather_service:latest
         imagePullPolicy: Always
         env:
         - name: PORT
