@@ -76,6 +76,14 @@ spec:
         - containerPort: 8000
           name: http
           protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /.well-known/agent-card.json
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          failureThreshold: 3
+          timeoutSeconds: 5
         readinessProbe:
           tcpSocket:
             port: 8000
