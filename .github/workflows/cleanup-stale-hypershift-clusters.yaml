@@ -49,10 +49,10 @@ jobs:
 
       - name: Setup management cluster kubeconfig
         env:
-          KUBECONFIG_BASE64: ${{ secrets.KUBECONFIG_HCP_MGMT }}
+          KUBECONFIG_HCP_MGMT: ${{ secrets.KUBECONFIG_HCP_MGMT }}
         run: |
           mkdir -p ~/.kube
-          echo "$KUBECONFIG_BASE64" | base64 -d > ~/.kube/config
+          echo "$KUBECONFIG_HCP_MGMT" | base64 -d > ~/.kube/config
           chmod 600 ~/.kube/config
           export KUBECONFIG=~/.kube/config
           oc whoami --show-server
