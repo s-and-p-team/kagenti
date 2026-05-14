@@ -200,8 +200,8 @@ echo "    Agent Sandbox: $WITH_AGENT_SANDBOX"
 echo "    Skip cluster:  $SKIP_CLUSTER"
 echo "    Build images:  $BUILD_IMAGES"
 echo "    Preload imgs:  $PRELOAD_IMAGES"
-echo "    Kagenti helm --values overrides: ${KAGENTI_VALUES_FILES[*]-}"
-echo "    Kagenti-deps helm --values overrides: ${KAGENTI_DEPS_VALUES_FILES[*]-}"
+echo "    Kagenti helm --values overrides: ${KAGENTI_VALUES_FILES[*]:-}"
+echo "    Kagenti-deps helm --values overrides: ${KAGENTI_DEPS_VALUES_FILES[*]:-}"
 echo ""
 
 for cmd in helm kubectl; do

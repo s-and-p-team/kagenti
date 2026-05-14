@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 class FeatureFlagsResponse(BaseModel):
     """Response model for feature flag status."""
 
+    builds: bool = Field(description="Shipwright build-from-source capability available")
     sandbox: bool = Field(description="Interactive sandbox session UI (Legion)")
     integrations: bool = Field(description="Third-party integration endpoints")
     triggers: bool = Field(description="Event-driven trigger system")
@@ -72,9 +73,12 @@ router = APIRouter(prefix="/config", tags=["config"])
     "/features",
     response_model=FeatureFlagsResponse,
 )
-async def get_feature_flags() -> FeatureFlagsResponse:
+async def get_feature_flags(
+    kube: KubernetesService = Depends(get_kubernetes_service),
+) -> FeatureFlagsResponse:
     """Return enabled feature flags for UI gating (public, no auth required)."""
     return FeatureFlagsResponse(
+        builds=kube.api_group_exists("shipwright.io"),
         sandbox=settings.kagenti_feature_flag_sandbox,
         integrations=settings.kagenti_feature_flag_integrations,
         triggers=settings.kagenti_feature_flag_triggers,
