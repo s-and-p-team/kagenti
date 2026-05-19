@@ -1,10 +1,6 @@
 name: Cleanup Stale HyperShift Clusters
 
 on:
-  # Scheduled cleanup every 3 hours (dry-run only for safety)
-  schedule:
-    - cron: '0 */3 * * *'
-
   # Manual trigger with configurable options
   workflow_dispatch:
     inputs:
