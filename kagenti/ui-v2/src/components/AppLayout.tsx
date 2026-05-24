@@ -431,6 +431,15 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children, features }) => {
                       Session Graph
                     </NavItem>
                   )}
+                  {features?.lineage && (
+                    <NavItem
+                      itemId="lineage"
+                      isActive={isNavItemActive('/lineage')}
+                      onClick={() => handleNavSelect('/lineage')}
+                    >
+                      Data Lineage
+                    </NavItem>
+                  )}
                   <NavItem
                     itemId="observability"
                     isActive={isNavItemActive('/observability')}

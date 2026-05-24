@@ -73,7 +73,7 @@ export class ApiError extends Error {
  * Generic fetch wrapper with error handling, optional authentication,
  * and automatic token refresh on 401 responses.
  */
-async function apiFetch<T>(
+export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {},
   skipAuth: boolean = false

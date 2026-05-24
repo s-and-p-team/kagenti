@@ -35,6 +35,7 @@ import { SandboxesPage } from './pages/SandboxesPage';
 import { SessionsTablePage } from './pages/SessionsTablePage';
 import { SessionGraphPage } from './pages/SessionGraphPage';
 import { TriggerManagementPage } from './pages/TriggerManagementPage';
+import { LineagePage } from './pages/lineage/LineagePage';
 
 function App() {
   const features = useFeatureFlags();
@@ -177,6 +178,16 @@ function App() {
             </ProtectedRoute>
           }
         />
+        {features.lineage && (
+          <Route
+            path="/lineage"
+            element={
+              <ProtectedRoute>
+                <LineagePage />
+              </ProtectedRoute>
+            }
+          />
+        )}
         <Route
           path="/observability"
           element={
