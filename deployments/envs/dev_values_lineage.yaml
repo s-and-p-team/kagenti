@@ -6,9 +6,15 @@
 #     -f deployments/envs/dev_values_lineage.yaml
 #
 # Enables the lineage-telemetry authbridge plugin on all agent
-# sidecars and exposes the Lineage UI tab in the kagenti frontend.
+# sidecars, deploys the lineage-service, and exposes the Lineage UI tab.
 
 charts:
+  kagenti-deps:
+    values:
+      components:
+        lineageService:
+          enabled: true
+
   kagenti:
     values:
       featureFlags:

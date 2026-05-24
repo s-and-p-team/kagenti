@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     )
     kagenti_feature_flag_lineage: bool = False  # data lineage tracing via lineage-telemetry plugin
 
+    # Lineage service URL (in-cluster; only used when kagenti_feature_flag_lineage=True)
+    lineage_service_url: str = "http://lineage-service.kagenti-system.svc.cluster.local:8000"
+
     # Label settings
     kagenti_label_prefix: str = "kagenti.io/"
     enabled_namespace_label_key: str = "kagenti-enabled"

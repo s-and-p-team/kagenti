@@ -95,6 +95,17 @@ if settings.kagenti_feature_flag_skills:
         logging.getLogger(__name__).warning(
             "SKILLS flag enabled but skills modules not installed — skipping"
         )
+
+_lineage_modules_loaded = False
+if settings.kagenti_feature_flag_lineage:
+    try:
+        from app.routers import lineage  # noqa: E402
+
+        _lineage_modules_loaded = True
+    except ImportError:
+        logging.getLogger(__name__).warning(
+            "LINEAGE flag enabled but lineage modules not installed — skipping"
+        )
 # pylint: enable=wrong-import-position,no-name-in-module,import-error
 
 # Configure logging
@@ -204,6 +215,10 @@ if _integrations_modules_loaded:
 if _skills_modules_loaded:
     app.include_router(skills.router, prefix="/api/v1")
     logger.info("Feature flag SKILLS enabled — skills routes registered")
+
+if _lineage_modules_loaded:
+    app.include_router(lineage.router, prefix="/api/v1")
+    logger.info("Feature flag LINEAGE enabled — lineage routes registered")
 # pylint: enable=used-before-assignment
 
 

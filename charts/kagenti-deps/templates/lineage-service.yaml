@@ -1,0 +1,332 @@
+{{- if .Values.components.lineageService.enabled }}
+{{- if not .Values.components.otel.enabled }}
+{{- fail "components.lineageService.enabled requires components.otel.enabled" }}
+{{- end }}
+---
+# Lineage service credentials (dev defaults; override lineageService.database in production)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: lineage-db-secret
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kagenti.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  user: {{ .Values.lineageService.database.user | quote }}
+  password: {{ .Values.lineageService.database.password | quote }}
+  database_url: "postgresql://{{ .Values.lineageService.database.user }}:{{ .Values.lineageService.database.password }}@lineage-postgres.{{ .Release.Namespace }}.svc.cluster.local:5432/{{ .Values.lineageService.database.name }}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lineage-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: lineage-postgres
+    {{- include "kagenti.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lineage-postgres
+  template:
+    metadata:
+      labels:
+        app: lineage-postgres
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.lineageService.database.name | quote }}
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: lineage-db-secret
+                  key: user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lineage-db-secret
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+              name: pg
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d {{ .Values.lineageService.database.name | quote }}"]
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            failureThreshold: 40
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: pgdata
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lineage-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: lineage-postgres
+    {{- include "kagenti.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: lineage-postgres
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: 5432
+---
+# Schema ConfigMap: DDL applied by the bootstrap Job below.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lineage-schema-sql
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kagenti.labels" . | nindent 4 }}
+data:
+  001_schema.sql: |
+    CREATE TABLE IF NOT EXISTS runs (
+        run_id       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        trace_id     TEXT        UNIQUE NOT NULL,
+        principal_id TEXT        NOT NULL,
+        username     TEXT,
+        started_at   TIMESTAMPTZ NOT NULL,
+        ended_at     TIMESTAMPTZ,
+        hop_count    INT         NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS hops (
+        hop_id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+        run_id         UUID        NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+        span_id        TEXT        UNIQUE NOT NULL,
+        parent_span_id TEXT,
+        caller_id      TEXT,
+        target_id      TEXT        NOT NULL,
+        hop_kind       TEXT        NOT NULL,
+        started_at     TIMESTAMPTZ NOT NULL,
+        duration_ms    INT,
+        attrs          JSONB       NOT NULL DEFAULT '{}'
+    );
+
+    CREATE TABLE IF NOT EXISTS edges (
+        caller_id    TEXT        NOT NULL,
+        target_id    TEXT        NOT NULL,
+        hop_kind     TEXT        NOT NULL,
+        principal_id TEXT        NOT NULL,
+        first_seen   TIMESTAMPTZ NOT NULL,
+        last_seen    TIMESTAMPTZ NOT NULL,
+        count        BIGINT      NOT NULL DEFAULT 1,
+        PRIMARY KEY (caller_id, target_id, hop_kind, principal_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS hops_run_id_started_idx    ON hops(run_id, started_at);
+    CREATE INDEX IF NOT EXISTS runs_principal_started_idx  ON runs(principal_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS edges_last_seen_idx         ON edges(last_seen DESC);
+    CREATE INDEX IF NOT EXISTS hops_span_id_idx            ON hops(span_id);
+---
+# Bootstrap Job: applies schema DDL on first deploy and after schema changes.
+# Helm hook weight -5 ensures it runs after the postgres Deployment but before lineage-service.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lineage-schema-bootstrap
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kagenti.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: lineage-schema-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for lineage-postgres to be ready..."
+              until pg_isready -h lineage-postgres -p 5432 -U "$POSTGRES_USER"; do
+                sleep 2
+              done
+              echo "Postgres is ready."
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: lineage-db-secret
+                  key: user
+      containers:
+        - name: apply-schema
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              psql -h lineage-postgres -p 5432 -U "$POSTGRES_USER" -d {{ .Values.lineageService.database.name | quote }} -f /schema/001_schema.sql
+              echo "Schema applied."
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: lineage-db-secret
+                  key: user
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: lineage-db-secret
+                  key: password
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+      volumes:
+        - name: schema
+          configMap:
+            name: lineage-schema-sql
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lineage-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: lineage-service
+    {{- include "kagenti.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lineage-service
+  template:
+    metadata:
+      labels:
+        app: lineage-service
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: lineage-service
+          image: {{ .Values.lineageService.image.repository }}:{{ .Values.lineageService.image.tag }}
+          imagePullPolicy: {{ .Values.lineageService.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: LINEAGE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: lineage-db-secret
+                  key: database_url
+            - name: LINEAGE_LOG_LEVEL
+              value: "INFO"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lineage-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: lineage-service
+    {{- include "kagenti.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: lineage-service
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+---
+{{- if .Values.openshift }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: lineage-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kagenti.labels" . | nindent 4 }}
+  annotations:
+    openshift.io/host.generated: "true"
+spec:
+  path: /
+  port:
+    targetPort: 8000
+  to:
+    kind: Service
+    name: lineage-service
+  wildcardPolicy: None
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+{{- else }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: lineage-service
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: lineage-service
+    {{- include "kagenti.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: http
+      namespace: {{ .Release.Namespace }}
+  hostnames:
+    - lineage.{{ .Values.domain | default "localtest.me" }}
+  rules:
+    - backendRefs:
+        - name: lineage-service
+          port: 8000
+{{- end }}
+{{- end }}

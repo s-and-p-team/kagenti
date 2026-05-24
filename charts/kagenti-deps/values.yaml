@@ -13,6 +13,8 @@ domain: localtest.me
 #   Enable or disable components here
 # ------------------------------------------------------------------
 components:
+  lineageService:
+    enabled: false
   mcpInspector:
     enabled: true
   istio:
@@ -319,6 +321,45 @@ otel:
           timeout: 10s
       service:
         extensions: [health_check, oauth2client/mlflow]
+    # Lineage service config - auto-merged when components.lineageService.enabled.
+    # Filters to spans emitted by the lineage-telemetry authbridge plugin
+    # (name == "lineage.hop") and exports them to the lineage service via OTLP/HTTP.
+    # The transform maps lineage.* attributes to the trust.* schema expected by
+    # the lineage service's span processor.
+    lineageConfig:
+      exporters:
+        otlphttp/lineage:
+          endpoint: http://lineage-service.kagenti-system.svc.cluster.local:8000
+          tls:
+            insecure: true
+      processors:
+        filter/lineage:
+          traces:
+            span:
+              # Drop spans that are not lineage hops (no lineage.hop.kind attr)
+              - 'attributes["lineage.hop.kind"] == nil'
+        transform/lineage_to_trust:
+          trace_statements:
+            - context: span
+              statements:
+                - >-
+                  set(attributes["trust.principal_id"], attributes["lineage.caller.id"])
+                  where attributes["lineage.caller.id"] != nil
+                - >-
+                  set(attributes["trust.caller_id"], attributes["lineage.caller.id"])
+                  where attributes["lineage.caller.id"] != nil
+                - >-
+                  set(attributes["trust.target_id"], attributes["lineage.target.id"])
+                  where attributes["lineage.target.id"] != nil
+                - >-
+                  set(attributes["trust.hop_kind"], attributes["lineage.hop.kind"])
+                  where attributes["lineage.hop.kind"] != nil
+      service:
+        pipelines:
+          traces/lineage:
+            receivers: [otlp]
+            processors: [memory_limiter, filter/lineage, transform/lineage_to_trust, batch]
+            exporters: [otlphttp/lineage]
     # RHOAI MLflow auth config - auto-merged when otel.mlflow.enabled && openshift.
     # Uses the collector's ServiceAccount token for authentication against
     # RHOAI MLflow's Kubernetes authorization plugin.
@@ -448,3 +489,17 @@ mlflow:
     # Set to true in ocp_values.yaml for production deployments
     enabled: false
     secretName: mlflow-oauth-secret
+
+# ------------------------------------------------------------------
+#  Lineage Service Configuration
+# ------------------------------------------------------------------
+lineageService:
+  image:
+    repository: ghcr.io/kagenti/kagenti/lineage-service
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  database:
+    # PostgreSQL credentials (dev defaults; override in production)
+    user: lineageuser
+    password: lineage4dev
+    name: lineage

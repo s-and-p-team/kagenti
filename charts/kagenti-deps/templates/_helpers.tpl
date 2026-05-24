@@ -86,6 +86,10 @@ not concatenated (e.g. service.extensions).
 {{- $config = mustMergeOverwrite $config (deepCopy $.Values.otel.collector.mlflowConfig) -}}
 {{- $hasComponentPipeline = true -}}
 {{- end -}}
+{{- if and $.Values.components.lineageService.enabled $.Values.otel.collector.lineageConfig -}}
+{{- $config = mustMergeOverwrite $config (deepCopy $.Values.otel.collector.lineageConfig) -}}
+{{- $hasComponentPipeline = true -}}
+{{- end -}}
 {{- if and (not $hasComponentPipeline) $.Values.otel.collector.defaultConfig -}}
 {{- $config = mustMergeOverwrite $config (deepCopy $.Values.otel.collector.defaultConfig) -}}
 {{- end -}}
