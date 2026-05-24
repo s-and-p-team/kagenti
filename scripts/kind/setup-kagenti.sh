@@ -64,7 +64,7 @@ TEKTON_VERSION="v0.66.0"
 SHIPWRIGHT_VERSION="v0.14.0"
 MCP_GATEWAY_VERSION="0.6.0"
 KUADRANT_VERSION="1.4.2"
-AGENT_SANDBOX_VERSION="v0.4.3"
+AGENT_SANDBOX_VERSION="v0.4.6"
 
 KAGENTI_DEPS_VALUES_FILES=()
 KAGENTI_VALUES_FILES=()
@@ -1181,6 +1181,20 @@ if $WITH_MCP_GATEWAY; then
     -n mcp-system --create-namespace --version "$MCP_GATEWAY_VERSION" \
     --set "broker.create=true"
   log_success "MCP Gateway installed"
+
+  if $WITH_OTEL; then
+    # The mcp-gateway chart deploys the broker-router via its controller and does not
+    # expose OTel config via Helm values. kubectl set env is the only injection point.
+    log_info "Patching MCP Gateway router with OTel exporter..."
+    if kubectl get deployment mcp-gateway -n mcp-system &>/dev/null; then
+      run_cmd kubectl set env deployment/mcp-gateway -n mcp-system \
+        OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.kagenti-system.svc.cluster.local:8335 \
+        OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+      log_success "MCP Gateway OTel exporter configured"
+    else
+      log_warn "deployment/mcp-gateway not found in mcp-system — skipping OTel patch (check chart version)"
+    fi
+  fi
 else
   log_info "Skipped (use --with-mcp-gateway)"
 fi

@@ -231,13 +231,16 @@ export const agentService = {
     authBridgeEnabled?: boolean;
     // SPIRE identity
     spireEnabled?: boolean;
-    // Per-sidecar injection controls
-    envoyProxyInject?: boolean;
-    spiffeHelperInject?: boolean;
+    // Per-workload AuthBridge mode (maps to AgentRuntime.Spec.AuthBridgeMode)
+    authBridgeMode?: 'proxy-sidecar' | 'envoy-sidecar' | 'lite' | 'waypoint';
+    // Per-workload mTLS posture (maps to AgentRuntime.Spec.MTLSMode).
+    // Backend rejects mtlsMode != 'disabled' when authBridgeMode === 'envoy-sidecar'.
+    mtlsMode?: 'disabled' | 'permissive' | 'strict';
     outboundRoutes?: Array<{ host: string; target_audience: string; token_scopes: string }>;
     outboundPortsExclude?: string;
     inboundPortsExclude?: string;
     defaultOutboundPolicy?: string;
+    persistentStorage?: { enabled: boolean; size: string };
     shipwrightConfig?: ShipwrightBuildConfig;
   }): Promise<{ success: boolean; name: string; namespace: string; message: string }> {
     return apiFetch('/agents', {
@@ -443,8 +446,8 @@ export const shipwrightService = {
       }>;
       createHttpRoute?: boolean;
       authBridgeEnabled?: boolean;
-      envoyProxyInject?: boolean;
-      spiffeHelperInject?: boolean;
+      authBridgeMode?: 'proxy-sidecar' | 'envoy-sidecar' | 'lite' | 'waypoint';
+      mtlsMode?: 'disabled' | 'permissive' | 'strict';
       outboundRoutes?: Array<{ host: string; target_audience: string; token_scopes: string }>;
       outboundPortsExclude?: string;
       inboundPortsExclude?: string;
@@ -534,9 +537,9 @@ export const toolService = {
     authBridgeEnabled?: boolean;
     // SPIRE identity
     spireEnabled?: boolean;
-    // Per-sidecar injection controls
-    envoyProxyInject?: boolean;
-    spiffeHelperInject?: boolean;
+    // Per-workload AuthBridge mode (maps to AgentRuntime.Spec.AuthBridgeMode
+    // for agents; deprecated kagenti.io/authbridge-mode pod annotation for tools)
+    authBridgeMode?: 'proxy-sidecar' | 'envoy-sidecar' | 'lite' | 'waypoint';
     outboundRoutes?: Array<{ host: string; target_audience: string; token_scopes: string }>;
     outboundPortsExclude?: string;
     inboundPortsExclude?: string;
@@ -671,8 +674,7 @@ export const toolShipwrightService = {
       }>;
       createHttpRoute?: boolean;
       authBridgeEnabled?: boolean;
-      envoyProxyInject?: boolean;
-      spiffeHelperInject?: boolean;
+      authBridgeMode?: 'proxy-sidecar' | 'envoy-sidecar' | 'lite' | 'waypoint';
       outboundRoutes?: Array<{ host: string; target_audience: string; token_scopes: string }>;
       outboundPortsExclude?: string;
       inboundPortsExclude?: string;
