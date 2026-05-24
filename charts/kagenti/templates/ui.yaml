@@ -142,6 +142,8 @@ spec:
               value: "{{ .Values.featureFlags.authbridgeAPI }}"
             - name: KAGENTI_FEATURE_FLAG_ADMIN
               value: "{{ .Values.featureFlags.admin }}"
+            - name: KAGENTI_FEATURE_FLAG_LINEAGE
+              value: "{{ .Values.featureFlags.lineage }}"
             - name: KEYCLOAK_URL
               value: {{ .Values.keycloak.url | quote }}
             - name: KEYCLOAK_PUBLIC_URL

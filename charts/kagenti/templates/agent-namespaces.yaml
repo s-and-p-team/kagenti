@@ -368,6 +368,11 @@ data:
               # kagenti-extensions#383.
               keycloak_url: "http://keycloak-service.{{ $root.Values.keycloak.namespace }}.svc:8080"
               keycloak_realm: {{ $root.Values.keycloak.realm | quote }}
+          {{- if $root.Values.featureFlags.lineage }}
+          - name: lineage-telemetry
+            config:
+              otel_endpoint: {{ $root.Values.authBridge.lineage.otelEndpoint | quote }}
+          {{- end }}
       outbound:
         plugins:
           - name: token-exchange
@@ -386,6 +391,11 @@ data:
                 # (the realm issuer URL). Only meaningful when type=spiffe.
                 jwt_audience: "{{ $root.Values.keycloak.publicUrl }}/realms/{{ $root.Values.keycloak.realm }}"
                 {{- end }}
+          {{- if $root.Values.featureFlags.lineage }}
+          - name: lineage-telemetry
+            config:
+              otel_endpoint: {{ $root.Values.authBridge.lineage.otelEndpoint | quote }}
+          {{- end }}
 ---
 {{- if $.Values.openshift }}
 # ——————————————————————————————————————————————————————————————————————————————

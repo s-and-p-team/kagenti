@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     kagenti_feature_flag_sidecars: bool = (
         False  # sidecar agents (looper, hallucination, context guardian)
     )
+    kagenti_feature_flag_lineage: bool = False  # data lineage tracing via lineage-telemetry plugin
 
     # Label settings
     kagenti_label_prefix: str = "kagenti.io/"

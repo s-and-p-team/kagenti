@@ -36,6 +36,7 @@ class FeatureFlagsResponse(BaseModel):
     skills: bool = Field(description="Skill management system (CRUD + catalog UI)")
     authbridgeAPI: bool = Field(description="AuthBridge statistics (API and UI)")
     admin: bool = Field(description="Platform Status card and /platform-status endpoint")
+    lineage: bool = Field(description="Data lineage tracing (lineage-telemetry plugin + UI)")
 
 
 class ComponentStatus(BaseModel):
@@ -85,6 +86,7 @@ async def get_feature_flags(
         skills=settings.kagenti_feature_flag_skills,
         authbridgeAPI=settings.kagenti_feature_flag_authbridge_api,
         admin=settings.kagenti_feature_flag_admin,
+        lineage=settings.kagenti_feature_flag_lineage,
     )
 
 

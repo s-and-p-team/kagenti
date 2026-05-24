@@ -14,6 +14,7 @@ featureFlags:
   skills: false
   authbridgeAPI: false
   admin: false
+  lineage: false
 
 # ------------------------------------------------------------------
 #  Control Panel: Enable or disable components here
@@ -206,6 +207,10 @@ authBridge:
   spiffeIdpAlias: "spire-spiffe"
   # How long AuthBridge fast-polls for credential files before switching to backoff
   credentialWaitTimeout: "120s"
+  # Lineage telemetry plugin config (active only when featureFlags.lineage=true)
+  lineage:
+    # OTLP gRPC endpoint for the lineage-telemetry plugin (http:// prefix is stripped)
+    otelEndpoint: "http://otel-collector.kagenti-system.svc.cluster.local:4317"
 
 # ------------------------------------------------------------------
 #  SPIFFE Identity Provider Setup Job Configuration

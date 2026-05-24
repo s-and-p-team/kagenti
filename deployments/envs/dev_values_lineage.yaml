@@ -1,0 +1,21 @@
+# Kagenti dev configuration with data lineage tracing enabled.
+# Layer on top of dev_values.yaml:
+#
+#   helm upgrade --install kagenti charts/umbrella/ \
+#     -f deployments/envs/dev_values.yaml \
+#     -f deployments/envs/dev_values_lineage.yaml
+#
+# Enables the lineage-telemetry authbridge plugin on all agent
+# sidecars and exposes the Lineage UI tab in the kagenti frontend.
+
+charts:
+  kagenti:
+    values:
+      featureFlags:
+        lineage: true
+
+      authBridge:
+        lineage:
+          # OTLP gRPC endpoint for span export.
+          # The lineage-telemetry plugin strips http:// before dialing.
+          otelEndpoint: "http://otel-collector.kagenti-system.svc.cluster.local:4317"
