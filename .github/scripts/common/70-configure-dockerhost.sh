@@ -6,18 +6,30 @@ source "$SCRIPT_DIR/../lib/logging.sh"
 
 log_step "70" "Configuring dockerhost service"
 
-# Get Docker/Podman host IP (filter for IPv4 — EndpointSlice requires addressType: IPv4)
-# Docker format:  .[].IPAM.Config[].Gateway  (uppercase, nested under IPAM)
-# Podman format:  .[].subnets[].gateway       (lowercase, top-level subnets array)
-_NETWORK_JSON=$(docker network inspect kind)
-DOCKER_HOST_IP=$(echo "$_NETWORK_JSON" | jq -r '
-  ( .[].IPAM.Config[]? | select(.Gateway != null) | .Gateway ),
-  ( .[].subnets[]?      | select(.gateway != null) | .gateway )
-  ' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+# Get the host IP as seen from inside Kind containers.
+#
+# On Podman/macOS the macOS host is reachable via host.containers.internal
+# (injected into /etc/hosts of every container by Podman), NOT via the
+# kind-network gateway. Prefer that when available.
+#
+# Fallback: Docker/Podman network gateway from 'docker network inspect kind'
+#   Docker format:  .[].IPAM.Config[].Gateway  (uppercase, nested under IPAM)
+#   Podman format:  .[].subnets[].gateway       (lowercase, top-level subnets array)
+CONTROL_PLANE="${CLUSTER_NAME:-kagenti}-control-plane"
+DOCKER_HOST_IP=$(docker exec "$CONTROL_PLANE" \
+    sh -c "getent hosts host.containers.internal 2>/dev/null | awk '{print \$1}' | head -1" 2>/dev/null || true)
+
+if [ -z "$DOCKER_HOST_IP" ] || [ "$DOCKER_HOST_IP" = "null" ]; then
+    log_info "host.containers.internal not found — falling back to network gateway"
+    _NETWORK_JSON=$(docker network inspect kind)
+    DOCKER_HOST_IP=$(echo "$_NETWORK_JSON" | jq -r '
+      ( .[].IPAM.Config[]? | select(.Gateway != null) | .Gateway ),
+      ( .[].subnets[]?      | select(.gateway != null) | .gateway )
+      ' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+fi
 
 if [ -z "$DOCKER_HOST_IP" ] || [ "$DOCKER_HOST_IP" = "null" ]; then
     log_error "Could not determine Docker host IP"
-    echo "$_NETWORK_JSON" | jq '.[0] | {IPAM, subnets}'
     exit 1
 fi
 
