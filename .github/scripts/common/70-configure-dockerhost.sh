@@ -6,12 +6,18 @@ source "$SCRIPT_DIR/../lib/logging.sh"
 
 log_step "70" "Configuring dockerhost service"
 
-# Get Docker host IP (filter for IPv4 — EndpointSlice requires addressType: IPv4)
-DOCKER_HOST_IP=$(docker network inspect kind | jq -r '.[].IPAM.Config[] | select(.Gateway != null) | .Gateway' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+# Get Docker/Podman host IP (filter for IPv4 — EndpointSlice requires addressType: IPv4)
+# Docker format:  .[].IPAM.Config[].Gateway  (uppercase, nested under IPAM)
+# Podman format:  .[].subnets[].gateway       (lowercase, top-level subnets array)
+_NETWORK_JSON=$(docker network inspect kind)
+DOCKER_HOST_IP=$(echo "$_NETWORK_JSON" | jq -r '
+  ( .[].IPAM.Config[]? | select(.Gateway != null) | .Gateway ),
+  ( .[].subnets[]?      | select(.gateway != null) | .gateway )
+  ' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
 
 if [ -z "$DOCKER_HOST_IP" ] || [ "$DOCKER_HOST_IP" = "null" ]; then
     log_error "Could not determine Docker host IP"
-    docker network inspect kind | jq '.[].IPAM.Config[]'
+    echo "$_NETWORK_JSON" | jq '.[0] | {IPAM, subnets}'
     exit 1
 fi
 
