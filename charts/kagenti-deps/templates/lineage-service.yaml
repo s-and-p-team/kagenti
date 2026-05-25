@@ -61,7 +61,7 @@ spec:
               name: pg
           readinessProbe:
             exec:
-              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d {{ .Values.lineageService.database.name | quote }}"]
+              command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
             initialDelaySeconds: 3
             periodSeconds: 3
             failureThreshold: 40
