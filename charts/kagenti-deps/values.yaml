@@ -228,7 +228,7 @@ otel:
           traces:
             span:
               - 'IsMatch(name, "^a2a\\..*")'
-              - 'attributes["http.method"] != nil and attributes["openinference.span.kind"] == nil'
+              - 'attributes["http.method"] != nil'
               - 'attributes["mcp.method.name"] == "initialize"'
               - 'attributes["mcp.method.name"] == "notifications/initialized"'
               - 'attributes["mcp.method.name"] == "notifications/cancelled"'
