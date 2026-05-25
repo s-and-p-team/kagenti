@@ -65,6 +65,7 @@ DO_DEPLOY=true
 DO_AGENTS=false
 DO_TEST=false
 DRY_RUN=false
+SKIP_BUILD=false
 
 # ── Interrupt handling ────────────────────────────────────────────────────────
 cleanup() {
@@ -83,6 +84,7 @@ while [[ $# -gt 0 ]]; do
         --demo-agents)   DO_AGENTS=true; shift ;;
         --test)          DO_TEST=true; DO_AGENTS=true; shift ;;
         --skip-deploy)   DO_DEPLOY=false; shift ;;
+        --skip-build)    SKIP_BUILD=true; shift ;;
         --cluster-name)  CLUSTER_NAME="$2"; shift 2 ;;
         --dry-run)       DRY_RUN=true; shift ;;
         --help|-h)
@@ -114,6 +116,39 @@ fi
 # ── OTel endpoint (in-cluster) ────────────────────────────────────────────────
 OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://otel-collector.kagenti-system.svc.cluster.local:4317}"
 
+# ── lineage-service image settings ───────────────────────────────────────────
+# For Kind we build locally and use pullPolicy=Never (no registry).
+# Override with LINEAGE_IMAGE / LINEAGE_IMAGE_TAG for a real registry.
+LINEAGE_IMAGE="${LINEAGE_IMAGE:-lineage-service}"
+LINEAGE_IMAGE_TAG="${LINEAGE_IMAGE_TAG:-latest}"
+LINEAGE_IMAGE_PULL_POLICY="${LINEAGE_IMAGE_PULL_POLICY:-Never}"
+DATA_LINEAGE_REPO="${DATA_LINEAGE_REPO:-$REPO_ROOT/../data_lineage}"
+
+# ============================================================================
+# PHASE 0: Build and load lineage-service image into Kind
+# ============================================================================
+if $DO_DEPLOY && ! $SKIP_BUILD; then
+    log_phase "PHASE 0: Build lineage-service image"
+
+    LINEAGE_SVC_DIR="$DATA_LINEAGE_REPO/lineage_service"
+    if [[ ! -f "$LINEAGE_SVC_DIR/Dockerfile" ]]; then
+        log_error "Dockerfile not found at $LINEAGE_SVC_DIR/Dockerfile"
+        log_error "Clone the data_lineage repo next to kagenti or set DATA_LINEAGE_REPO="
+        exit 1
+    fi
+
+    log_step "Building $LINEAGE_IMAGE:$LINEAGE_IMAGE_TAG from $LINEAGE_SVC_DIR..."
+    run_cmd docker build -t "${LINEAGE_IMAGE}:${LINEAGE_IMAGE_TAG}" "$LINEAGE_SVC_DIR"
+    log_success "Image built"
+
+    log_step "Loading image into Kind cluster '$CLUSTER_NAME'..."
+    run_cmd kind load docker-image "${LINEAGE_IMAGE}:${LINEAGE_IMAGE_TAG}" --name "$CLUSTER_NAME"
+    log_success "Image loaded into Kind"
+
+    log_phase "PHASE 0: Complete"
+    echo ""
+fi
+
 # ============================================================================
 # PHASE 1: Helm upgrades
 # ============================================================================
@@ -130,6 +165,9 @@ if $DO_DEPLOY; then
         -n kagenti-system \
         --reuse-values \
         --set components.lineageService.enabled=true \
+        --set "lineageService.image.repository=${LINEAGE_IMAGE}" \
+        --set "lineageService.image.tag=${LINEAGE_IMAGE_TAG}" \
+        --set "lineageService.image.pullPolicy=${LINEAGE_IMAGE_PULL_POLICY}" \
         --wait --timeout 15m
 
     log_success "kagenti-deps upgraded"
