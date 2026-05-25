@@ -145,8 +145,32 @@ if $DO_DEPLOY && ! $SKIP_BUILD; then
     run_cmd kind load docker-image "${LINEAGE_IMAGE}:${LINEAGE_IMAGE_TAG}" --name "$CLUSTER_NAME"
     log_success "Image loaded into Kind"
 
+    # Podman prefixes local images with 'localhost/' when stored in Kind's
+    # container runtime (e.g. 'lineage-service' -> 'localhost/lineage-service').
+    # Discover the actual stored name so the Helm --set uses the right reference.
+    _KIND_IMAGE=$(docker exec "${CLUSTER_NAME}-control-plane" \
+        crictl images 2>/dev/null \
+        | awk '/lineage-service/{print $1":"$2}' | head -1)
+    if [[ -n "$_KIND_IMAGE" && "$_KIND_IMAGE" != ":" ]]; then
+        LINEAGE_IMAGE="${_KIND_IMAGE%%:*}"
+        LINEAGE_IMAGE_TAG="${_KIND_IMAGE##*:}"
+        log_info "Image stored in Kind as: ${LINEAGE_IMAGE}:${LINEAGE_IMAGE_TAG}"
+    fi
+
     log_phase "PHASE 0: Complete"
     echo ""
+fi
+
+# If --skip-build, still detect the stored image name from the Kind node
+if $DO_DEPLOY && $SKIP_BUILD; then
+    _KIND_IMAGE=$(docker exec "${CLUSTER_NAME}-control-plane" \
+        crictl images 2>/dev/null \
+        | awk '/lineage-service/{print $1":"$2}' | head -1)
+    if [[ -n "$_KIND_IMAGE" && "$_KIND_IMAGE" != ":" ]]; then
+        LINEAGE_IMAGE="${_KIND_IMAGE%%:*}"
+        LINEAGE_IMAGE_TAG="${_KIND_IMAGE##*:}"
+        log_info "Using existing image in Kind: ${LINEAGE_IMAGE}:${LINEAGE_IMAGE_TAG}"
+    fi
 fi
 
 # ============================================================================
