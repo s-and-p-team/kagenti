@@ -196,6 +196,23 @@ if $DO_DEPLOY; then
 
     log_success "kagenti-deps upgraded"
 
+    # ── 1a-post. Ensure lineage-service deployment has the correct image ───────
+    # Helm upgrade can store the right values but leave the Deployment unchanged
+    # when the previous rollout was stuck in progressDeadlineExceeded. Patch
+    # directly if the current spec diverges from what we just set.
+    _CURRENT_IMG=$(kubectl get deployment lineage-service -n kagenti-system \
+        -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
+    _WANT_IMG="${LINEAGE_IMAGE}:${LINEAGE_IMAGE_TAG}"
+    if [[ -n "$_CURRENT_IMG" && "$_CURRENT_IMG" != "$_WANT_IMG" ]]; then
+        log_warn "Deployment image is '$_CURRENT_IMG', expected '$_WANT_IMG' — patching..."
+        run_cmd kubectl set image deployment/lineage-service \
+            "lineage-service=${_WANT_IMG}" -n kagenti-system
+        run_cmd kubectl patch deployment lineage-service -n kagenti-system \
+            --type=json \
+            -p "[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/imagePullPolicy\",\"value\":\"${LINEAGE_IMAGE_PULL_POLICY}\"}]"
+        log_success "Deployment image patched to '$_WANT_IMG'"
+    fi
+
     # ── 1b. kagenti: enable lineage feature flag ──────────────────────────────
     log_step "Upgrading kagenti (lineage feature flag + authbridge plugin)..."
 
