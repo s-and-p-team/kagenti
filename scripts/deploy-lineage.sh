@@ -111,12 +111,8 @@ if ! kubectl cluster-info &>/dev/null; then
     exit 1
 fi
 
-# ── Env values files ──────────────────────────────────────────────────────────
-LINEAGE_VALUES="$REPO_ROOT/deployments/envs/dev_values_lineage.yaml"
-if [[ ! -f "$LINEAGE_VALUES" ]]; then
-    log_error "Values file not found: $LINEAGE_VALUES"
-    exit 1
-fi
+# ── OTel endpoint (in-cluster) ────────────────────────────────────────────────
+OTEL_ENDPOINT="${OTEL_ENDPOINT:-http://otel-collector.kagenti-system.svc.cluster.local:4317}"
 
 # ============================================================================
 # PHASE 1: Helm upgrades
@@ -125,15 +121,15 @@ if $DO_DEPLOY; then
     log_phase "PHASE 1: Helm — enable lineage components"
 
     # ── 1a. kagenti-deps: enable lineageService component ────────────────────
+    # NOTE: dev_values_lineage.yaml is an installer-overlay file (nested under
+    # charts.kagenti-deps.values.*). Helm's --values reads it literally, so
+    # the nested path would not reach the chart. Use --set flags instead.
     log_step "Upgrading kagenti-deps (lineageService + OTel pipeline)..."
 
-    # Collect existing --set flags from the running release so we don't clobber
-    # components that were already enabled (otel, mlflow, etc.).
-    # We pass the lineage values file on top; it only adds keys.
     run_cmd helm upgrade kagenti-deps "$REPO_ROOT/charts/kagenti-deps/" \
         -n kagenti-system \
         --reuse-values \
-        --values "$LINEAGE_VALUES" \
+        --set components.lineageService.enabled=true \
         --wait --timeout 15m
 
     log_success "kagenti-deps upgraded"
@@ -144,7 +140,8 @@ if $DO_DEPLOY; then
     run_cmd helm upgrade kagenti "$REPO_ROOT/charts/kagenti/" \
         -n kagenti-system \
         --reuse-values \
-        --values "$LINEAGE_VALUES" \
+        --set featureFlags.lineage=true \
+        --set "authBridge.lineage.otelEndpoint=${OTEL_ENDPOINT}" \
         --wait --timeout 15m
 
     log_success "kagenti upgraded"
