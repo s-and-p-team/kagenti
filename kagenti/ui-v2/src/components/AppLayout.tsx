@@ -437,7 +437,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children, features }) => {
                       isActive={isNavItemActive('/lineage')}
                       onClick={() => handleNavSelect('/lineage')}
                     >
-                      Data Lineage
+                      Execution Flow
                     </NavItem>
                   )}
                   <NavItem

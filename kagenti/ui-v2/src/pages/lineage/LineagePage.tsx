@@ -31,7 +31,7 @@ export const LineagePage: React.FC = () => {
     <>
       <PageSection variant="light" padding={{ default: 'noPadding' }}>
         <div style={{ padding: '16px 24px 0' }}>
-          <Title headingLevel="h1" size="xl">Data Lineage</Title>
+          <Title headingLevel="h1" size="xl">Execution Flow</Title>
           <p style={{ color: '#666', marginTop: 4 }}>
             Trust provenance graph — who authorized what, which agents delegate to which,
             which principals reach which tools.

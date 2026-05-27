@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/lineage", tags=["lineage"])
 
-_viewer = Depends(require_roles([ROLE_VIEWER]))
+_viewer = Depends(require_roles(ROLE_VIEWER))
 
 
 def _lineage_url() -> str:
