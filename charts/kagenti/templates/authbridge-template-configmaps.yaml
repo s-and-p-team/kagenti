@@ -78,6 +78,9 @@ data:
               keycloak_url: "http://keycloak-service.{{ .Values.keycloak.namespace }}.svc:8080"
               keycloak_realm: {{ .Values.keycloak.realm | quote }}
           {{- if .Values.featureFlags.lineage }}
+          - name: a2a-parser
+          - name: mcp-parser
+          - name: inference-parser
           - name: lineage-telemetry
             config:
               otel_endpoint: {{ .Values.authBridge.lineage.otelEndpoint | quote }}
@@ -98,6 +101,9 @@ data:
                 jwt_audience: "{{ .Values.keycloak.publicUrl }}/realms/{{ .Values.keycloak.realm }}"
                 {{- end }}
           {{- if .Values.featureFlags.lineage }}
+          - name: a2a-parser
+          - name: mcp-parser
+          - name: inference-parser
           - name: lineage-telemetry
             config:
               otel_endpoint: {{ .Values.authBridge.lineage.otelEndpoint | quote }}
