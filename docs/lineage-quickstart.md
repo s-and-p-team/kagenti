@@ -1,83 +1,162 @@
 # Data Lineage Quickstart
 
-This guide walks through deploying the data lineage stack on a local Kind
-cluster and verifying that agent trust provenance hops are captured end-to-end.
+This guide walks through deploying the full data lineage stack on a local Kind
+cluster so that agent trust provenance hops are captured end-to-end and visible
+in the UI.
 
 ## What you get
 
 - **Trajectories tab** — per-request trust chains showing every hop from
-  principal → agent → tool, with timing and outcome
-- **Delegation Graph tab** — aggregate view of which agents invoke which agents
+  principal → agent → tool / LLM, with timing and source/target identity
+- **Hop Log** — a flat list of all hops with a right-side detail panel (click
+  any row to inspect span attributes, model name, duration, etc.)
+- **Sequence** — swimlane diagram with CHAIN/TOOL color coding and a toggle to
+  hide MCP protocol setup calls (hidden by default for readability)
+- **Graph** — ReactFlow DAG with arrows labeled ×N for multi-hop edges; click
+  an arrow to inspect each call individually via tabbed panels
+- **Delegation Graph** — aggregate view of which agents invoke which agents
   across all requests
-- **Principal Paths tab** — shows which principals triggered a specific
-  agent → tool path
+- **Principal Paths** — which principals triggered a specific agent → tool path
+- **Delete runs** — per-row checkboxes + "Delete selected" / "Clear all" in the
+  Trajectories list
 
-All data is captured transparently by the `lineage-telemetry` authbridge sidecar
-plugin — no changes to agent code are required.
+All data is captured transparently by the `lineage-telemetry` authbridge plugin —
+no changes to agent code are required.
 
 ---
 
 ## Prerequisites
 
-| Tool | Minimum version | Notes |
-|------|----------------|-------|
-| `kind` | 0.22 | Local Kubernetes |
-| `kubectl` | 1.28 | Cluster access |
-| `helm` | 3.14 | Chart management |
-| `docker` | 24 | Image builds |
-| `uv` | 0.4 | Python test runner (for `--test`) |
+| Tool | Minimum version |
+|------|----------------|
+| `kind` | 0.22 |
+| `kubectl` | 1.28 |
+| `helm` | 3.14 |
+| `docker` | 24 |
 
-The base Kagenti platform must already be installed on the cluster. If you
-haven't done that yet:
+---
+
+## Repo layout
+
+Check out all three repos on the `lineage_plugin` branch as siblings:
 
 ```bash
-.github/scripts/local-setup/kind-full-test.sh --skip-cluster-destroy
+mkdir -p ~/development && cd ~/development
+
+git clone git@github.com:<your-fork>/kagenti.git
+cd kagenti && git checkout lineage_plugin && cd ..
+
+git clone git@github.com:<your-fork>/kagenti-extensions.git
+cd kagenti-extensions && git checkout lineage_plugin && cd ..
+
+git clone git@github.com:<your-fork>/data_lineage.git
+cd data_lineage && git checkout lineage_plugin && cd ..
+```
+
+Expected layout:
+```
+~/development/
+  kagenti/           ← lineage_plugin branch
+  kagenti-extensions/ ← lineage_plugin branch
+  data_lineage/       ← lineage_plugin branch
 ```
 
 ---
 
-## One-command setup
+## Step 1 — Build the authbridge image with the lineage plugin
+
+The lineage plugin lives in `kagenti-extensions/authbridge/authlib/plugins/lineage/`
+and is compiled into the `authbridge-proxy` binary. Build it from the
+`authbridge/` context (not the repo root):
 
 ```bash
-scripts/deploy-lineage.sh --demo-agents --test
+cd ~/development/kagenti-extensions/authbridge
+docker build -f cmd/authbridge-proxy/Dockerfile \
+  -t localhost/authbridge:lineage-plugin .
 ```
 
-This does everything:
+This takes ~2 minutes on first build (Go module download + compile).
 
-1. Enables the `lineageService` Helm component and the `lineage` feature flag
-2. Deploys `weather-service` (A2A agent) and `weather-tool` (MCP tool)
-3. Runs the lineage E2E tests (Phase 1 traffic + Phase 2 validation)
+---
 
-A successful run ends with:
+## Step 2 — Build the lineage-service image
 
-```
-══ PHASE 4: All lineage E2E tests passed ══
-
-Lineage stack deployment complete.
-
-  Lineage UI:  http://kagenti-ui.localtest.me:8080  → Data Lineage tab
+```bash
+cd ~/development/data_lineage
+docker build -t localhost/lineage-service:latest lineage_service/
 ```
 
 ---
 
-## Step-by-step
+## Step 3 — Deploy the base platform
 
-### 1. Deploy the lineage stack
+From the kagenti repo root:
 
 ```bash
-scripts/deploy-lineage.sh --demo-agents
+cd ~/development/kagenti
+./.github/scripts/local-setup/kind-full-test.sh --skip-cluster-destroy
 ```
 
-The script upgrades two Helm releases:
+This creates a Kind cluster (`kagenti`), installs all dependencies (Keycloak,
+SPIRE, Istio, OTel collector, Tekton), deploys the kagenti platform, and runs
+the weather agent demo. It takes ~15–20 minutes on the first run.
 
-- **`kagenti-deps`** — adds the `lineage-service` (FastAPI + PostgreSQL) and
-  extends the OTel collector pipeline with `filter/lineage` and
-  `transform/lineage_to_trust` processors
-- **`kagenti`** — sets `featureFlags.lineage=true` and injects the
-  `lineage-telemetry` plugin config into every agent namespace's authbridge
-  ConfigMap
+When it finishes, verify the platform is healthy:
 
-### 2. Send a weather query
+```bash
+./.github/scripts/local-setup/show-services.sh
+```
+
+---
+
+## Step 4 — Load images into Kind and override authbridge
+
+Load both images into the Kind cluster and update the operator's sidecar image
+so it injects the lineage-plugin build into new and restarted pods:
+
+```bash
+cd ~/development/kagenti
+
+kind load docker-image localhost/authbridge:lineage-plugin --name kagenti
+kind load docker-image localhost/lineage-service:latest --name kagenti
+
+# Override the authbridge sidecar image for all agent namespaces
+helm upgrade kagenti charts/kagenti/ -n kagenti-system --reuse-values \
+  --set "kagenti-operator-chart.defaults.images.authbridge=localhost/authbridge:lineage-plugin"
+
+# Restart agent pods so they pick up the new authbridge sidecar
+kubectl rollout restart deployment -n team1
+kubectl rollout status deployment -n team1 --timeout=120s
+```
+
+---
+
+## Step 5 — Deploy the lineage stack
+
+Run the deploy script from the kagenti repo root (it expects to be run there
+because it calls `helm upgrade charts/kagenti-deps/` and `docker build kagenti/`):
+
+```bash
+cd ~/development/kagenti
+bash ../data_lineage/lineage_service/manifests/deploy.sh
+```
+
+The script:
+
+1. Creates `lineage-postgres-credentials` secret (skipped if it already exists)
+2. Deploys Postgres and runs the schema bootstrap Job
+3. Deploys the lineage-service pod + Service + HTTPRoute
+4. Patches the OTel collector to add the `filter/lineage` + `transform/lineage_to_trust`
+   processors and the `otlphttp/lineage` exporter
+5. Builds the kagenti-ui from local source and loads it into Kind (captures the
+   new Hop Log, CHAIN toggle, and multi-hop edge UI)
+6. Enables `KAGENTI_FEATURE_FLAG_LINEAGE=true` on the kagenti-backend
+
+When the script finishes it prints the lineage UI URL.
+
+---
+
+## Step 6 — Send a test query and verify
 
 Open a second terminal and port-forward the weather agent:
 
@@ -85,35 +164,49 @@ Open a second terminal and port-forward the weather agent:
 kubectl port-forward -n team1 svc/weather-service 8000:8080
 ```
 
-Then send a query:
+Send a query (use any city):
 
 ```bash
 curl -s http://localhost:8000/weather?city=Paris | jq .
 ```
 
-### 3. Open the lineage UI
-
 Navigate to `http://kagenti-ui.localtest.me:8080` and click **Data Lineage**
-in the left nav.
+in the left navigation. Within ~30 seconds the **Trajectories** tab should show
+a run. Click it to open the trajectory detail.
 
-Within ~30 seconds the **Trajectories** tab should show one or more runs. Click
-a run to see the DAG with colour-coded hops:
+---
+
+## Trajectory detail — UI walkthrough
+
+### Hop Log tab
+
+A flat list of all hops with Kind badge, source/target, and duration. Click any
+row to open the detail panel on the right showing full span attributes. The
+**CHAIN** pill hides MCP protocol setup calls (`agent_to_service` kind) by
+default — click it to show them.
+
+### Sequence tab
+
+Swimlane diagram ordered by time. Hops are color-coded:
 
 | Colour | Hop kind | Meaning |
 |--------|----------|---------|
-| Blue | `principal_to_agent` | End-user or service reaching the agent |
-| Green | `agent_to_agent` | Agent delegating to another agent (A2A) |
-| Orange | `agent_to_tool` | Agent calling an MCP tool |
+| Blue-grey | `agent_to_service` | MCP protocol setup / init (CHAIN) |
+| Green | `agent_to_tool` | Agent calling an MCP tool |
+| Blue | `principal_to_agent` | End-user reaching the entry agent |
+| Orange | `agent_to_agent` | Agent delegating to another agent |
+| Purple | `agent_to_llm` | Agent calling an LLM |
 
-### 4. Filter by principal, agent, or time range
+The sticky header has a **CHAIN** toggle (hidden by default) to declutter the
+view.
 
-Use the filter bar at the top of each tab:
+### Graph tab
 
-- **Principal** — filter to a specific Keycloak user subject (`sub` claim)
-- **Agent** — filter to runs that touched a specific agent workload
-- **Tool** — used with agent filter in the Principal Paths tab to find who
-  triggered an exact agent → tool path
-- **Time range** — 1 h / 24 h / 7 d / all
+ReactFlow DAG. Principal node at the top. Click any node or arrow:
+
+- **Node** — right panel shows all hops to/from that workload
+- **Arrow** — right panel shows the hop details; arrows labeled ×N have numbered
+  tabs so you can inspect each individual call
 
 ---
 
@@ -122,65 +215,39 @@ Use the filter bar at the top of each tab:
 If hops are not appearing, check each layer in order:
 
 ```bash
-# 1. Is the authbridge plugin emitting spans?
-kubectl logs -n team1 deploy/weather-service -c authbridge | grep lineage
+# 1. Is the authbridge lineage plugin emitting spans?
+kubectl logs -n team1 -l app=weather-service -c authbridge --tail=50 | grep lineage
 
 # 2. Is the OTel collector receiving and forwarding them?
-kubectl logs -n kagenti-system deploy/otel-collector | grep lineage
+kubectl logs -n kagenti-system deploy/otel-collector --tail=50 | grep lineage
 
-# 3. Is the lineage-service receiving POSTed spans?
-kubectl logs -n kagenti-system deploy/lineage-service | tail -20
+# 3. Is the lineage-service receiving spans?
+kubectl logs -n kagenti-system deploy/lineage-service --tail=20
 
 # 4. Does the API return runs?
-kubectl port-forward -n kagenti-system svc/kagenti-backend 8002:8000 &
-curl -s http://localhost:8002/api/v1/lineage/runs | jq length
-```
-
----
-
-## Running the E2E tests standalone
-
-After traffic has been generated (Step 2 above), run the observability phase:
-
-```bash
-export KAGENTI_BACKEND_URL=http://localhost:8002
-export KAGENTI_CONFIG_FILE=deployments/envs/dev_values_lineage.yaml
-
-cd kagenti
-uv run pytest tests/e2e/common/test_lineage_traces.py -v -m observability
-```
-
-Expected output:
-
-```
-PASSED tests/e2e/common/test_lineage_traces.py::TestLineageServiceConnectivity::test_lineage_runs_endpoint_reachable
-PASSED tests/e2e/common/test_lineage_traces.py::TestLineageDataCapture::test_lineage_runs_appear
-PASSED tests/e2e/common/test_lineage_traces.py::TestLineageDataCapture::test_run_has_valid_structure
-PASSED tests/e2e/common/test_lineage_traces.py::TestLineageDataCapture::test_trajectory_has_hops
-PASSED tests/e2e/common/test_lineage_traces.py::TestLineageDataCapture::test_trajectory_hop_kinds
+kubectl port-forward -n kagenti-system svc/lineage-service 8001:8000 &
+curl -s http://localhost:8001/runs | jq length
 ```
 
 ---
 
 ## Teardown
 
-The lineage stack is additive — to disable it, run a `helm upgrade` that omits
-the lineage values file and removes the component:
+Remove the lineage stack but keep the cluster:
 
 ```bash
-helm upgrade kagenti-deps charts/kagenti-deps/ -n kagenti-system \
-  --reuse-values \
-  --set components.lineageService.enabled=false \
-  --wait
+bash ~/development/data_lineage/lineage_service/manifests/undeploy.sh
 
-helm upgrade kagenti charts/kagenti/ -n kagenti-system \
-  --reuse-values \
-  --set featureFlags.lineage=false \
-  --wait
+# Remove credentials secret (not deleted by undeploy.sh)
+kubectl delete secret lineage-postgres-credentials -n kagenti-system --ignore-not-found
+
+# Re-enable the default authbridge image
+helm upgrade kagenti charts/kagenti/ -n kagenti-system --reuse-values \
+  --set "kagenti-operator-chart.defaults.images.authbridge=ghcr.io/kagenti/kagenti-extensions/authbridge:v0.6.0-alpha.4"
 ```
 
 To destroy the entire cluster:
 
 ```bash
-.github/scripts/local-setup/kind-full-test.sh --include-cluster-destroy
+./.github/scripts/local-setup/kind-full-test.sh --include-cluster-destroy
 ```
