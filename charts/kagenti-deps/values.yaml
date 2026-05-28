@@ -343,11 +343,11 @@ otel:
             - context: span
               statements:
                 - >-
-                  set(attributes["trust.principal_id"], attributes["lineage.caller.id"])
-                  where attributes["lineage.caller.id"] != nil
+                  set(attributes["trust.source_id"], attributes["lineage.source.id"])
+                  where attributes["lineage.source.id"] != nil
                 - >-
-                  set(attributes["trust.caller_id"], attributes["lineage.caller.id"])
-                  where attributes["lineage.caller.id"] != nil
+                  set(attributes["trust.principal_id"], attributes["lineage.source.id"])
+                  where attributes["lineage.source.id"] != nil and attributes["trust.principal_id"] == nil
                 - >-
                   set(attributes["trust.target_id"], attributes["lineage.target.id"])
                   where attributes["lineage.target.id"] != nil

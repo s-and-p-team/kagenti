@@ -16,16 +16,16 @@ export interface Hop {
   run_id: string;
   span_id: string;
   parent_span_id: string | null;
-  caller_id: string | null;
+  source_id: string | null;
   target_id: string;
-  hop_kind: 'principal_to_agent' | 'agent_to_agent' | 'agent_to_tool' | 'agent_to_llm';
+  hop_kind: string;
   started_at: string;
   duration_ms: number | null;
   attrs: Record<string, unknown>;
 }
 
 export interface CommonEdge {
-  caller_id: string;
+  source_id: string;
   target_id: string;
   total_count: number;
   principal_count: number;

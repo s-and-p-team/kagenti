@@ -38,7 +38,7 @@ export const CommonEdgesPanel: React.FC<Props> = ({ filters }) => {
   const rows = (data ?? []).filter((e) => {
     if (!filters.agent) return true;
     const a = filters.agent.toLowerCase();
-    return e.caller_id.toLowerCase().includes(a) || e.target_id.toLowerCase().includes(a);
+    return e.source_id.toLowerCase().includes(a) || e.target_id.toLowerCase().includes(a);
   });
 
   if (isLoading) return <Spinner />;
@@ -66,7 +66,7 @@ export const CommonEdgesPanel: React.FC<Props> = ({ filters }) => {
     <Table aria-label="Common delegation edges" variant="compact">
       <Thead>
         <Tr>
-          <Th>Caller</Th>
+          <Th>Source</Th>
           <Th>Target</Th>
           <Th modifier="nowrap">Total calls</Th>
           <Th modifier="nowrap">Principals</Th>
@@ -77,7 +77,7 @@ export const CommonEdgesPanel: React.FC<Props> = ({ filters }) => {
       <Tbody>
         {rows.map((e, i) => (
           <Tr key={i}>
-            <Td><code>{e.caller_id}</code></Td>
+            <Td><code>{e.source_id}</code></Td>
             <Td><code>{e.target_id}</code></Td>
             <Td><span style={{ fontWeight: 600 }}>{e.total_count}</span></Td>
             <Td>{e.principal_count}</Td>
