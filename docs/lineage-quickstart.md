@@ -36,9 +36,9 @@ no changes to agent code are required.
 
 ---
 
-## Repo layout
+## Step a — Clone the three repos
 
-Three repos are needed, all on the `lineage_plugin` branch, as siblings.
+All three repos must be siblings of each other on the `lineage_plugin` branch.
 `kagenti-operator` and `agent-examples` are **not** needed locally — the operator
 is bundled in the kagenti Helm chart, and the weather demo agent is built in-cluster
 by Shipwright directly from GitHub.
@@ -46,14 +46,9 @@ by Shipwright directly from GitHub.
 ```bash
 mkdir -p ~/development && cd ~/development
 
-git clone git@github.com:s-and-p-team/kagenti.git
-cd kagenti && git checkout lineage_plugin && cd ..
-
-git clone git@github.com:s-and-p-team/kagenti-extensions.git
-cd kagenti-extensions && git checkout lineage_plugin && cd ..
-
-git clone git@github.com:s-and-p-team/data_lineage.git
-cd data_lineage && git checkout lineage_plugin && cd ..
+git clone -b lineage_plugin git@github.com:s-and-p-team/kagenti.git
+git clone -b lineage_plugin git@github.com:s-and-p-team/kagenti-extensions.git
+git clone -b lineage_plugin git@github.com:s-and-p-team/data_lineage.git
 ```
 
 Expected layout:
@@ -66,102 +61,50 @@ Expected layout:
 
 ---
 
-## Step 1 — Build the authbridge image with the lineage plugin
-
-The lineage plugin lives in `kagenti-extensions/authbridge/authlib/plugins/lineage/`
-and is compiled into the `authbridge-proxy` binary. Build it from the
-`authbridge/` context (not the repo root):
-
-```bash
-cd ~/development/kagenti-extensions/authbridge
-docker build -f cmd/authbridge-proxy/Dockerfile \
-  -t localhost/authbridge:lineage-plugin .
-```
-
-This takes ~2 minutes on first build (Go module download + compile).
-
----
-
-## Step 2 — Build the lineage-service image
-
-```bash
-cd ~/development/data_lineage
-docker build -t localhost/lineage-service:latest lineage_service/
-```
-
----
-
-## Step 3 — Deploy the base platform
-
-From the kagenti repo root:
+## Step b — Build the images
 
 ```bash
 cd ~/development/kagenti
-./.github/scripts/local-setup/kind-full-test.sh --skip-cluster-destroy
+scripts/lineage/build-images.sh
 ```
 
-This creates a Kind cluster (`kagenti`), installs all dependencies (Keycloak,
-SPIRE, Istio, OTel collector, Tekton), deploys the kagenti platform, and runs
-the weather agent demo. It takes ~15–20 minutes on the first run.
+This builds two Docker images (~2 minutes on first run for Go module downloads):
 
-When it finishes, verify the platform is healthy:
-
-```bash
-./.github/scripts/local-setup/show-services.sh
-```
+- `localhost/authbridge:lineage-plugin` — authbridge proxy with the lineage-telemetry plugin compiled in
+- `localhost/lineage-service:latest` — the data lineage REST service
 
 ---
 
-## Step 4 — Load images into Kind and override authbridge
-
-Load both images into the Kind cluster and update the operator's sidecar image
-so it injects the lineage-plugin build into new and restarted pods:
+## Step c — Deploy everything
 
 ```bash
 cd ~/development/kagenti
-
-kind load docker-image localhost/authbridge:lineage-plugin --name kagenti
-kind load docker-image localhost/lineage-service:latest --name kagenti
-
-# Override the authbridge sidecar image for all agent namespaces
-helm upgrade kagenti charts/kagenti/ -n kagenti-system --reuse-values \
-  --set "kagenti-operator-chart.defaults.images.authbridge=localhost/authbridge:lineage-plugin"
-
-# Restart agent pods so they pick up the new authbridge sidecar
-kubectl rollout restart deployment -n team1
-kubectl rollout status deployment -n team1 --timeout=120s
+scripts/lineage/deploy-lineage.sh
 ```
 
----
+This takes ~15–20 minutes on the first run. It:
 
-## Step 5 — Deploy the lineage stack
+1. Creates a Kind cluster (`kagenti`) and installs all platform dependencies
+   (Keycloak, SPIRE, Istio, OTel collector, Tekton) via `kind-full-test.sh`
+2. Loads both images into the Kind cluster
+3. Overrides the authbridge sidecar image so the lineage plugin is active in agent pods
+4. Enables the lineage feature flag on the kagenti backend
+5. Deploys Postgres + lineage-service + configures the OTel pipeline
+6. Restarts agent pods in `team1` so they pick up the new authbridge sidecar
 
-Run the deploy script from the kagenti repo root (it expects to be run there
-because it calls `helm upgrade charts/kagenti-deps/` and `docker build kagenti/`):
+When it finishes it prints the lineage UI URL and a test curl command.
+
+**If your cluster is already up** (e.g. you're iterating on lineage code only):
 
 ```bash
-cd ~/development/kagenti
-bash ../data_lineage/lineage_service/manifests/deploy.sh
+scripts/lineage/deploy-lineage.sh --skip-platform
 ```
-
-The script:
-
-1. Creates `lineage-postgres-credentials` secret (skipped if it already exists)
-2. Deploys Postgres and runs the schema bootstrap Job
-3. Deploys the lineage-service pod + Service + HTTPRoute
-4. Patches the OTel collector to add the `filter/lineage` + `transform/lineage_to_trust`
-   processors and the `otlphttp/lineage` exporter
-5. Builds the kagenti-ui from local source and loads it into Kind (captures the
-   new Hop Log, CHAIN toggle, and multi-hop edge UI)
-6. Enables `KAGENTI_FEATURE_FLAG_LINEAGE=true` on the kagenti-backend
-
-When the script finishes it prints the lineage UI URL.
 
 ---
 
-## Step 6 — Send a test query and verify
+## Step d — Send a test query and verify
 
-Open a second terminal and port-forward the weather agent:
+In a second terminal, port-forward the weather agent:
 
 ```bash
 kubectl port-forward -n team1 svc/weather-service 8000:8080
@@ -170,7 +113,7 @@ kubectl port-forward -n team1 svc/weather-service 8000:8080
 Send a query (use any city):
 
 ```bash
-curl -s http://localhost:8000/weather?city=Paris | jq .
+curl -s 'http://localhost:8000/weather?city=Paris' | jq .
 ```
 
 Navigate to `http://kagenti-ui.localtest.me:8080` and click **Data Lineage**
@@ -239,14 +182,13 @@ curl -s http://localhost:8001/runs | jq length
 Remove the lineage stack but keep the cluster:
 
 ```bash
-bash ~/development/data_lineage/lineage_service/manifests/undeploy.sh
-
-# Remove credentials secret (not deleted by undeploy.sh)
-kubectl delete secret lineage-postgres-credentials -n kagenti-system --ignore-not-found
-
-# Re-enable the default authbridge image
+# Disable lineage feature flag and lineageService component
 helm upgrade kagenti charts/kagenti/ -n kagenti-system --reuse-values \
+  --set "featureFlags.lineage=false" \
   --set "kagenti-operator-chart.defaults.images.authbridge=ghcr.io/kagenti/kagenti-extensions/authbridge:v0.6.0-alpha.4"
+
+helm upgrade kagenti-deps charts/kagenti-deps/ -n kagenti-system --reuse-values \
+  --set "components.lineageService.enabled=false"
 ```
 
 To destroy the entire cluster:
