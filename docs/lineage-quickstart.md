@@ -75,34 +75,45 @@ This builds two Docker images (~2 minutes on first run for Go module downloads):
 
 ---
 
-## Step c — Deploy everything
+## Step c — Deploy the base platform
+
+```bash
+cd ~/development/kagenti
+./.github/scripts/local-setup/kind-full-test.sh --skip-cluster-destroy
+```
+
+This creates a Kind cluster (`kagenti`), installs all platform dependencies
+(Keycloak, SPIRE, Istio, OTel collector, Tekton), deploys the kagenti platform,
+and runs the weather agent demo. It takes ~15–20 minutes on the first run.
+
+When it finishes, verify the platform is healthy:
+
+```bash
+./.github/scripts/local-setup/show-services.sh
+```
+
+---
+
+## Step d — Wire the lineage stack
 
 ```bash
 cd ~/development/kagenti
 scripts/lineage/deploy-lineage.sh
 ```
 
-This takes ~15–20 minutes on the first run. It:
+This takes ~2–3 minutes (cluster is already up). It:
 
-1. Creates a Kind cluster (`kagenti`) and installs all platform dependencies
-   (Keycloak, SPIRE, Istio, OTel collector, Tekton) via `kind-full-test.sh`
-2. Loads both images into the Kind cluster
-3. Overrides the authbridge sidecar image so the lineage plugin is active in agent pods
-4. Enables the lineage feature flag on the kagenti backend
-5. Deploys Postgres + lineage-service + configures the OTel pipeline
-6. Restarts agent pods in `team1` so they pick up the new authbridge sidecar
+1. Loads both images into the Kind cluster
+2. Overrides the authbridge sidecar image so the lineage plugin is active in agent pods
+3. Enables the lineage feature flag on the kagenti backend
+4. Deploys Postgres + lineage-service + configures the OTel pipeline
+5. Restarts agent pods in `team1` so they pick up the new authbridge sidecar
 
 When it finishes it prints the lineage UI URL and a test curl command.
 
-**If your cluster is already up** (e.g. you're iterating on lineage code only):
-
-```bash
-scripts/lineage/deploy-lineage.sh --skip-platform
-```
-
 ---
 
-## Step d — Send a test query and verify
+## Step e — Send a test query and verify
 
 In a second terminal, port-forward the weather agent:
 

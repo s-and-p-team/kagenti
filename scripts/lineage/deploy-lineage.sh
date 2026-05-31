@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # ============================================================================
-# DEPLOY LINEAGE STACK (full)
+# DEPLOY LINEAGE STACK
 # ============================================================================
-# Deploys the Kagenti base platform and the full data lineage stack on a local
-# Kind cluster.  Run after scripts/lineage/build-images.sh.
+# Wires the lineage stack into a running Kagenti Kind cluster.
+# Run after kind-full-test.sh (base platform) and scripts/lineage/build-images.sh.
 #
 # Run from the kagenti repo root:
 #   cd ~/development/kagenti
@@ -11,31 +11,27 @@
 #
 # What this script does
 # ---------------------
-#   1. Deploys the Kagenti base platform via kind-full-test.sh (skip with
-#      --skip-platform when the cluster is already up)
-#   2. Loads localhost/authbridge:lineage-plugin into Kind
-#   3. Loads localhost/lineage-service:latest into Kind
-#   4. Helm-upgrades the kagenti chart to:
+#   1. Loads localhost/authbridge:lineage-plugin into Kind
+#   2. Loads localhost/lineage-service:latest into Kind
+#   3. Helm-upgrades the kagenti chart to:
 #        - override the authbridge sidecar image to the lineage-plugin build
 #        - enable the lineage feature flag
-#   5. Helm-upgrades kagenti-deps to enable the lineageService component
+#   4. Helm-upgrades kagenti-deps to enable the lineageService component
 #      (Postgres + lineage-service + OTel pipeline)
-#   6. Restarts team1 agent pods so they pick up the new authbridge sidecar
-#   7. Waits for lineage-service and kagenti-backend to be ready
-#   8. Prints the lineage UI URL and a test curl command
+#   5. Restarts team1 agent pods so they pick up the new authbridge sidecar
+#   6. Waits for lineage-service and kagenti-backend to be ready
+#   7. Prints the lineage UI URL and a test curl command
 #
 # Usage
 # -----
-#   scripts/lineage/deploy-lineage.sh                  # full deploy (~20 min)
-#   scripts/lineage/deploy-lineage.sh --skip-platform  # skip step 1 (cluster already up)
-#   scripts/lineage/deploy-lineage.sh --dry-run        # print commands without running
+#   scripts/lineage/deploy-lineage.sh           # deploy lineage stack
+#   scripts/lineage/deploy-lineage.sh --dry-run # print commands without running
 #   scripts/lineage/deploy-lineage.sh --help
 #
 # Prerequisites
 # -------------
-#   - Docker and kind installed and on PATH
+#   - Kagenti Kind cluster is up (.github/scripts/local-setup/kind-full-test.sh)
 #   - Both images built: scripts/lineage/build-images.sh
-#   - kagenti-extensions/ and data_lineage/ cloned as siblings of kagenti/
 # ============================================================================
 set -euo pipefail
 
@@ -54,7 +50,6 @@ log_step()    { echo -e "  ${BLUE}▸${NC} $1"; }
 # ── Defaults ─────────────────────────────────────────────────────────────────
 CLUSTER_NAME="${CLUSTER_NAME:-kagenti}"
 DOMAIN="${DOMAIN:-localtest.me}"
-SKIP_PLATFORM=false
 DRY_RUN=false
 
 # ── Interrupt handling ────────────────────────────────────────────────────────
@@ -69,8 +64,7 @@ trap cleanup SIGINT SIGTERM
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --skip-platform) SKIP_PLATFORM=true; shift ;;
-        --dry-run)       DRY_RUN=true; shift ;;
+        --dry-run)  DRY_RUN=true; shift ;;
         --help|-h)
             sed -n '/^# Usage/,/^# Prerequisites/p' "$0" | sed 's/^# \{0,2\}//'
             exit 0
@@ -91,7 +85,13 @@ run_cmd() {
     fi
 }
 
-# ── Verify images were built ──────────────────────────────────────────────────
+# ── Sanity checks ─────────────────────────────────────────────────────────────
+if ! kubectl cluster-info &>/dev/null; then
+    log_error "kubectl cannot reach the cluster."
+    log_error "Run .github/scripts/local-setup/kind-full-test.sh --skip-cluster-destroy first."
+    exit 1
+fi
+
 for img in "localhost/authbridge:lineage-plugin" "localhost/lineage-service:latest"; do
     if ! docker image inspect "$img" &>/dev/null; then
         log_error "Image not found: $img"
@@ -100,24 +100,8 @@ for img in "localhost/authbridge:lineage-plugin" "localhost/lineage-service:late
     fi
 done
 
-# ── Step 1: Deploy base platform ─────────────────────────────────────────────
-if ! $SKIP_PLATFORM; then
-    log_phase "STEP 1: Deploy Kagenti base platform (~15-20 min)"
-    log_info "Running kind-full-test.sh --skip-cluster-destroy"
-    log_info "Pass --skip-platform to skip this step if the cluster is already up."
-    run_cmd bash "$REPO_ROOT/.github/scripts/local-setup/kind-full-test.sh" \
-        --skip-cluster-destroy
-    log_success "Base platform deployed"
-else
-    log_info "Skipping base platform deploy (--skip-platform)"
-    if ! kubectl cluster-info &>/dev/null; then
-        log_error "kubectl cannot reach the cluster. Is KUBECONFIG set correctly?"
-        exit 1
-    fi
-fi
-
-# ── Step 2: Load images into Kind ────────────────────────────────────────────
-log_phase "STEP 2: Load images into Kind"
+# ── Step 1: Load images into Kind ────────────────────────────────────────────
+log_phase "STEP 1: Load images into Kind"
 
 log_step "Loading localhost/authbridge:lineage-plugin ..."
 run_cmd kind load docker-image localhost/authbridge:lineage-plugin --name "$CLUSTER_NAME"
@@ -141,8 +125,8 @@ else
     LINEAGE_IMAGE_TAG="latest"
 fi
 
-# ── Step 3: Helm upgrade — kagenti (authbridge override + lineage flag) ───────
-log_phase "STEP 3: Override authbridge sidecar image + enable lineage feature flag"
+# ── Step 2: Helm upgrade — kagenti (authbridge override + lineage flag) ───────
+log_phase "STEP 2: Override authbridge sidecar image + enable lineage feature flag"
 
 run_cmd helm upgrade kagenti "$REPO_ROOT/charts/kagenti/" \
     -n kagenti-system \
@@ -153,8 +137,8 @@ run_cmd helm upgrade kagenti "$REPO_ROOT/charts/kagenti/" \
 
 log_success "kagenti chart upgraded"
 
-# ── Step 4: Helm upgrade — kagenti-deps (lineageService + OTel pipeline) ─────
-log_phase "STEP 4: Enable lineage service and OTel pipeline"
+# ── Step 3: Helm upgrade — kagenti-deps (lineageService + OTel pipeline) ─────
+log_phase "STEP 3: Enable lineage service and OTel pipeline"
 
 run_cmd helm upgrade kagenti-deps "$REPO_ROOT/charts/kagenti-deps/" \
     -n kagenti-system \
@@ -167,16 +151,16 @@ run_cmd helm upgrade kagenti-deps "$REPO_ROOT/charts/kagenti-deps/" \
 
 log_success "kagenti-deps chart upgraded"
 
-# ── Step 5: Restart team1 so agents pick up the new authbridge sidecar ───────
-log_phase "STEP 5: Restart agent pods (pick up new authbridge sidecar)"
+# ── Step 4: Restart team1 so agents pick up the new authbridge sidecar ───────
+log_phase "STEP 4: Restart agent pods (pick up new authbridge sidecar)"
 
 run_cmd kubectl rollout restart deployment -n team1
 log_step "Waiting for team1 rollout ..."
 run_cmd kubectl rollout status deployment -n team1 --timeout=120s
 log_success "team1 agents restarted"
 
-# ── Step 6: Wait for lineage-service ─────────────────────────────────────────
-log_phase "STEP 6: Wait for lineage-service to be ready"
+# ── Step 5: Wait for lineage-service ─────────────────────────────────────────
+log_phase "STEP 5: Wait for lineage-service to be ready"
 
 run_cmd kubectl rollout status deployment/lineage-service \
     -n kagenti-system --timeout=180s || {
@@ -186,7 +170,7 @@ run_cmd kubectl rollout status deployment/lineage-service \
 }
 log_success "lineage-service is ready"
 
-# ── Step 7: Restart kagenti-backend to pick up KAGENTI_FEATURE_FLAG_LINEAGE ──
+# ── Step 6: Restart kagenti-backend to pick up KAGENTI_FEATURE_FLAG_LINEAGE ──
 log_step "Restarting kagenti-backend ..."
 run_cmd kubectl rollout restart deployment/kagenti-backend -n kagenti-system 2>/dev/null || true
 run_cmd kubectl rollout status deployment/kagenti-backend -n kagenti-system \
