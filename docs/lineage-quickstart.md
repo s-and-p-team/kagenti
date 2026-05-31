@@ -38,25 +38,28 @@ no changes to agent code are required.
 
 ## Repo layout
 
-Check out all three repos on the `lineage_plugin` branch as siblings:
+Three repos are needed, all on the `lineage_plugin` branch, as siblings.
+`kagenti-operator` and `agent-examples` are **not** needed locally — the operator
+is bundled in the kagenti Helm chart, and the weather demo agent is built in-cluster
+by Shipwright directly from GitHub.
 
 ```bash
 mkdir -p ~/development && cd ~/development
 
-git clone git@github.com:<your-fork>/kagenti.git
+git clone git@github.com:s-and-p-team/kagenti.git
 cd kagenti && git checkout lineage_plugin && cd ..
 
-git clone git@github.com:<your-fork>/kagenti-extensions.git
+git clone git@github.com:s-and-p-team/kagenti-extensions.git
 cd kagenti-extensions && git checkout lineage_plugin && cd ..
 
-git clone git@github.com:<your-fork>/data_lineage.git
+git clone git@github.com:s-and-p-team/data_lineage.git
 cd data_lineage && git checkout lineage_plugin && cd ..
 ```
 
 Expected layout:
 ```
 ~/development/
-  kagenti/           ← lineage_plugin branch
+  kagenti/            ← lineage_plugin branch
   kagenti-extensions/ ← lineage_plugin branch
   data_lineage/       ← lineage_plugin branch
 ```
