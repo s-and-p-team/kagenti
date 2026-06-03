@@ -68,11 +68,11 @@ const COL_X: Record<string, number> = {
   source: 80,
   agent:  300,
   llm:    520,
-  tool:   520,
+  tool:   740,
 };
 const NODE_W    = 160;
 const NODE_H    = 48;
-const VERT_GAP  = 76;
+const VERT_GAP  = 90;
 
 // ─── Node classification ──────────────────────────────────────────────────────
 
@@ -123,26 +123,19 @@ function buildGraph(hops: Hop[]): { nodes: Node[]; edges: Edge[] } {
   const byCol: Record<string, string[]> = { source: [], agent: [], llm: [], tool: [] };
   for (const [id, t] of nodeTypes) byCol[t].push(id);
 
+  // Center each column's nodes around the same vertical midpoint.
+  // For N nodes: positions run from center - floor(N/2)*gap to center + floor(N/2)*gap.
+  const cols = ['source', 'agent', 'llm', 'tool'] as const;
+  const maxN = Math.max(1, ...cols.map(col => byCol[col].length));
+  const centerY = ((maxN - 1) / 2) * VERT_GAP;
+
   const nodeY = new Map<string, number>();
-  let leafRow = 0;
-  for (const col of ['llm', 'tool'] as const) {
-    for (const id of byCol[col]) nodeY.set(id, leafRow++ * VERT_GAP);
-  }
-
-  for (const agentId of byCol['agent']) {
-    const ys = hops
-      .filter(h => h.source_id === agentId)
-      .map(h => nodeY.get(h.target_id))
-      .filter((y): y is number => y !== undefined);
-    nodeY.set(agentId, ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0);
-  }
-
-  for (const srcId of byCol['source']) {
-    const ys = hops
-      .filter(h => h.source_id === srcId)
-      .map(h => nodeY.get(h.target_id))
-      .filter((y): y is number => y !== undefined);
-    nodeY.set(srcId, ys.length ? (Math.min(...ys) + Math.max(...ys)) / 2 : 0);
+  for (const col of cols) {
+    const ids = byCol[col];
+    const n = ids.length;
+    for (let i = 0; i < n; i++) {
+      nodeY.set(ids[i], centerY + (i - (n - 1) / 2) * VERT_GAP);
+    }
   }
 
   const nodes: Node[] = [...nodeTypes.keys()].map(id => ({
@@ -412,18 +405,22 @@ function GraphView({ hops, onSelect }: { hops: Hop[]; onSelect: (item: SelectedI
   }, [onSelect]);
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={NODE_TYPES}
-      onEdgeClick={handleEdgeClick}
-      onNodeClick={handleNodeClick}
-      fitView
-      proOptions={{ hideAttribution: true }}
-    >
-      <Background />
-      <Controls />
-    </ReactFlow>
+    <div style={{ width: '100%', height: '100%' }}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={NODE_TYPES}
+        onEdgeClick={handleEdgeClick}
+        onNodeClick={handleNodeClick}
+        fitView
+        fitViewOptions={{ padding: 0.2, minZoom: 0.1 }}
+        minZoom={0.1}
+        proOptions={{ hideAttribution: true }}
+      >
+        <Background />
+        <Controls />
+      </ReactFlow>
+    </div>
   );
 }
 
