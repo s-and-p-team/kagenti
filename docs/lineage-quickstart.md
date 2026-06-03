@@ -27,12 +27,25 @@ no changes to agent code are required.
 
 ## Prerequisites
 
-| Tool | Minimum version |
-|------|----------------|
-| `kind` | 0.22 |
-| `kubectl` | 1.28 |
-| `helm` | 3.14 |
-| `docker` | 24 |
+| Tool | Minimum version | Notes |
+|------|----------------|-------|
+| `git` | any | |
+| `kind` | 0.22 | |
+| `kubectl` | 1.28 | |
+| `helm` | 3.14 | |
+| `docker` | 24 | Docker Desktop or Podman Desktop |
+| `jq` | any | used in verification commands |
+| `ollama` | any | must be running locally with `qwen2.5:3b` pulled |
+
+SSH access to `github.com` is required — the clone commands use SSH (`git@github.com:…`).
+If you only have HTTPS access, replace `git@github.com:s-and-p-team/` with
+`https://github.com/s-and-p-team/` in the clone commands below.
+
+Ollama must be running and reachable on `localhost:11434` before step c.
+Pull the model once if you haven't already:
+```bash
+ollama pull qwen2.5:3b
+```
 
 ---
 
@@ -40,8 +53,9 @@ no changes to agent code are required.
 
 All three repos must be siblings of each other on the `lineage_plugin` branch.
 `kagenti-operator` and `agent-examples` are **not** needed locally — the operator
-is bundled in the kagenti Helm chart, and the weather demo agent is built in-cluster
-by Shipwright directly from GitHub.
+is bundled in the kagenti Helm chart. On Kind, the weather-service agent image is
+pulled from `ghcr.io/kagenti/agent-examples/weather_service:latest` (no local build
+needed). The weather-tool MCP server is built in-cluster by Shipwright from GitHub.
 
 ```bash
 mkdir -p ~/development && cd ~/development
@@ -83,8 +97,15 @@ cd ~/development/kagenti
 ```
 
 This creates a Kind cluster (`kagenti`), installs all platform dependencies
-(Keycloak, SPIRE, Istio, OTel collector, Tekton), deploys the kagenti platform,
-and runs the weather agent demo. It takes ~15–20 minutes on the first run.
+(Keycloak, SPIRE, Istio, OTel collector, Shipwright), deploys the kagenti platform,
+deploys the weather agent demo, and runs the E2E test suite. It takes
+~30–40 minutes on the first run (image pulls + E2E tests).
+
+To skip the E2E tests and save ~10 minutes:
+
+```bash
+./.github/scripts/local-setup/kind-full-test.sh --skip-cluster-destroy --skip-test
+```
 
 When it finishes, verify the platform is healthy:
 
@@ -101,13 +122,14 @@ cd ~/development/kagenti
 scripts/lineage/deploy-lineage.sh
 ```
 
-This takes ~2–3 minutes (cluster is already up). It:
+This takes ~5–10 minutes (cluster is already up). It:
 
 1. Loads both images into the Kind cluster
 2. Overrides the authbridge sidecar image so the lineage plugin is active in agent pods
 3. Enables the lineage feature flag on the kagenti backend
 4. Deploys Postgres + lineage-service + configures the OTel pipeline
 5. Restarts agent pods in `team1` so they pick up the new authbridge sidecar
+6. Restarts `kagenti-backend` so it picks up the `KAGENTI_FEATURE_FLAG_LINEAGE=true` setting
 
 When it finishes it prints the lineage UI URL and a test curl command.
 
@@ -115,19 +137,33 @@ When it finishes it prints the lineage UI URL and a test curl command.
 
 ## Step e — Send a test query and verify
 
-In a second terminal, port-forward the weather agent:
+The weather-service speaks the A2A (JSON-RPC) protocol. Port-forward directly to
+the agent container (port 8001) to bypass the authbridge JWT check for local testing:
 
 ```bash
-kubectl port-forward -n team1 svc/weather-service 8000:8080
+POD=$(kubectl get pod -n team1 -l app.kubernetes.io/name=weather-service \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl port-forward -n team1 pod/$POD 8000:8001 &
 ```
 
 Send a query (use any city):
 
 ```bash
-curl -s 'http://localhost:8000/weather?city=Paris' | jq .
+curl -s -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0", "id": 1, "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user", "messageId": "test-001",
+        "parts": [{"kind": "text", "text": "What is the weather in Paris?"}]
+      },
+      "metadata": {}
+    }
+  }' | jq .result.artifacts[0].parts[0].text
 ```
 
-Navigate to `http://kagenti-ui.localtest.me:8080` and click **Data Lineage**
+Navigate to `http://kagenti-ui.localtest.me:8080` and click **Execution Flow**
 in the left navigation. Within ~30 seconds the **Trajectories** tab should show
 a run. Click it to open the trajectory detail.
 
@@ -173,7 +209,7 @@ If hops are not appearing, check each layer in order:
 
 ```bash
 # 1. Is the authbridge lineage plugin emitting spans?
-kubectl logs -n team1 -l app=weather-service -c authbridge --tail=50 | grep lineage
+kubectl logs -n team1 -l app.kubernetes.io/name=weather-service -c authbridge-proxy --tail=50 | grep lineage
 
 # 2. Is the OTel collector receiving and forwarding them?
 kubectl logs -n kagenti-system deploy/otel-collector --tail=50 | grep lineage
@@ -184,6 +220,42 @@ kubectl logs -n kagenti-system deploy/lineage-service --tail=20
 # 4. Does the API return runs?
 kubectl port-forward -n kagenti-system svc/lineage-service 8001:8000 &
 curl -s http://localhost:8001/runs | jq length
+```
+
+---
+
+## Troubleshooting
+
+### Pods stuck in `Pending` — Insufficient CPU
+
+Kind clusters have limited CPU headroom. Each agent pod gets an injected
+`authbridge-proxy` sidecar that by default requests `100m` CPU. On a busy
+cluster these requests can exhaust the schedulable budget even when actual
+utilisation is low.
+
+Diagnose:
+```bash
+kubectl describe pod -n team1 -l app.kubernetes.io/name=weather-service | grep -A3 Events
+# Look for: 0/1 nodes are available: 1 Insufficient cpu
+```
+
+Fix — set sidecar CPU requests to `0` in the platform config:
+```bash
+kubectl get configmap kagenti-platform-config -n kagenti-system -o json \
+  | python3 -c "
+import sys, json, yaml
+cm = json.load(sys.stdin)
+cfg = yaml.safe_load(cm['data']['config.yaml'])
+for comp in ['authbridge', 'envoyProxy', 'proxyInit']:
+    for section in ['requests', 'limits']:
+        cfg['resources'].get(comp, {}).get(section, {})['cpu'] = '0'
+cm['data']['config.yaml'] = yaml.dump(cfg)
+print(json.dumps(cm))
+" | kubectl apply -f -
+
+kubectl rollout restart deployment/kagenti-controller-manager -n kagenti-system
+kubectl rollout status  deployment/kagenti-controller-manager -n kagenti-system --timeout=60s
+kubectl rollout restart deployment/weather-service -n team1
 ```
 
 ---
