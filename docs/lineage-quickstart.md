@@ -9,7 +9,9 @@ in the UI.
 - **Trajectories tab** — per-request trust chains showing every hop from
   principal → agent → tool / LLM, with timing and source/target identity
 - **Hop Log** — a flat list of all hops with a right-side detail panel (click
-  any row to inspect span attributes, model name, duration, etc.)
+  any row to inspect span attributes, model name, duration, and the actual
+  prompt/completion or tool arguments/result). `agent_to_llm` hops include a
+  **"View prompt & completion in Phoenix →"** link that opens the full trace.
 - **Sequence** — swimlane diagram with CHAIN/TOOL color coding and a toggle to
   hide MCP protocol setup calls (hidden by default for readability)
 - **Graph** — ReactFlow DAG with arrows labeled ×N for multi-hop edges; click
@@ -20,8 +22,11 @@ in the UI.
 - **Delete runs** — per-row checkboxes + "Delete selected" / "Clear all" in the
   Trajectories list
 
-All data is captured transparently by the `lineage-telemetry` authbridge plugin —
-no changes to agent code are required.
+All data is captured transparently by the `lineage-telemetry` authbridge plugin
+with `capture_io: true` — no changes to agent code are required. The plugin
+parses the parsed inference/MCP/A2A extensions already populated by upstream
+parsers and attaches `input.value` / `output.value` to every hop span, making
+prompt, completion, and tool call data visible in both Execution Flow and Phoenix.
 
 ---
 
@@ -49,13 +54,10 @@ ollama pull qwen2.5:3b
 
 ---
 
-## Step a — Clone the three repos
+## Step a — Clone the four repos
 
-All three repos must be siblings of each other on the `lineage_plugin` branch.
-`kagenti-operator` and `agent-examples` are **not** needed locally — the operator
-is bundled in the kagenti Helm chart. On Kind, the weather-service agent image is
-pulled from `ghcr.io/kagenti/agent-examples/weather_service:latest` (no local build
-needed). The weather-tool MCP server is built in-cluster by Shipwright from GitHub.
+All four repos must be siblings of each other. Three use the `lineage_plugin`
+branch; `agent-examples` uses its main branch.
 
 ```bash
 mkdir -p ~/development && cd ~/development
@@ -63,6 +65,7 @@ mkdir -p ~/development && cd ~/development
 git clone -b lineage_plugin git@github.com:s-and-p-team/kagenti.git
 git clone -b lineage_plugin git@github.com:s-and-p-team/kagenti-extensions.git
 git clone -b lineage_plugin git@github.com:s-and-p-team/data_lineage.git
+git clone              git@github.com:s-and-p-team/agent-examples.git
 ```
 
 Expected layout:
@@ -71,6 +74,7 @@ Expected layout:
   kagenti/            ← lineage_plugin branch
   kagenti-extensions/ ← lineage_plugin branch
   data_lineage/       ← lineage_plugin branch
+  agent-examples/     ← main branch
 ```
 
 ---
@@ -82,10 +86,15 @@ cd ~/development/kagenti
 scripts/lineage/build-images.sh
 ```
 
-This builds two Docker images (~2 minutes on first run for Go module downloads):
+This builds five Docker images (~5 minutes on first run):
 
-- `localhost/authbridge:lineage-plugin` — authbridge proxy with the lineage-telemetry plugin compiled in
-- `localhost/lineage-service:latest` — the data lineage REST service
+| Image | Source | Purpose |
+|-------|--------|---------|
+| `localhost/authbridge:lineage-plugin` | kagenti-extensions | authbridge with lineage-telemetry plugin + `capture_io` |
+| `localhost/lineage-service:latest` | data_lineage | lineage REST service + Postgres schema |
+| `localhost/weather-tool:lineage` | agent-examples | weather MCP tool (wttr.in backend) |
+| `localhost/kagenti-backend:lineage` | kagenti | backend with lineage DELETE routes |
+| `localhost/kagenti-ui:lineage` | kagenti | UI with Execution Flow input/output + Phoenix link |
 
 ---
 
@@ -122,14 +131,21 @@ cd ~/development/kagenti
 scripts/lineage/deploy-lineage.sh
 ```
 
+To also deploy Phoenix (accessible at `http://phoenix.localtest.me:8080`):
+
+```bash
+scripts/lineage/deploy-lineage.sh --phoenix
+```
+
 This takes ~5–10 minutes (cluster is already up). It:
 
-1. Loads both images into the Kind cluster
-2. Overrides the authbridge sidecar image so the lineage plugin is active in agent pods
+1. Loads all 5 images into the Kind cluster
+2. Overrides the authbridge sidecar image so the lineage plugin is active in agent pods (with `capture_io=true` so input/output data is captured on every hop)
 3. Enables the lineage feature flag on the kagenti backend
 4. Deploys Postgres + lineage-service + configures the OTel pipeline
 5. Restarts agent pods in `team1` so they pick up the new authbridge sidecar
-6. Restarts `kagenti-backend` so it picks up the `KAGENTI_FEATURE_FLAG_LINEAGE=true` setting
+6. Deploys the custom weather-tool (wttr.in), backend, and UI images
+7. Restarts `kagenti-backend` so it picks up the `KAGENTI_FEATURE_FLAG_LINEAGE=true` setting
 
 When it finishes it prints the lineage UI URL and a test curl command.
 

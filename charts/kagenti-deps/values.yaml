@@ -229,8 +229,11 @@ otel:
         filter/phoenix:
           traces:
             span:
+              # Drop redundant authbridge protocol/LLM spans; keep principal_to_agent (trace root)
+              # and agent_to_agent/agent_to_tool which add graph context Phoenix doesn't duplicate.
+              - 'attributes["lineage.hop.kind"] == "agent_to_service"'
               - 'IsMatch(name, "^a2a\\..*")'
-              - 'attributes["http.method"] != nil and attributes["openinference.span.kind"] == nil'
+              - 'attributes["http.method"] != nil and attributes["openinference.span.kind"] == nil and attributes["lineage.hop.kind"] == nil'
               - 'attributes["mcp.method.name"] == "initialize"'
               - 'attributes["mcp.method.name"] == "notifications/initialized"'
               - 'attributes["mcp.method.name"] == "notifications/cancelled"'
@@ -266,6 +269,18 @@ otel:
                   set(attributes["llm.invocation_parameters"],
                   Concat(["{\"temperature\":", Concat([attributes["gen_ai.request.temperature"], "}"], "")], ""))
                   where attributes["gen_ai.request.temperature"] != nil
+                - >-
+                  set(attributes["input.value"], attributes["gen_ai.input.messages"])
+                  where attributes["gen_ai.input.messages"] != nil
+                - >-
+                  set(attributes["output.value"], attributes["gen_ai.output.messages"])
+                  where attributes["gen_ai.output.messages"] != nil
+                - >-
+                  set(attributes["openinference.span.kind"], "LLM")
+                  where attributes["gen_ai.operation.name"] == "chat"
+                - >-
+                  set(attributes["openinference.span.kind"], "TOOL")
+                  where attributes["gen_ai.operation.name"] == "execute_tool"
       service:
         pipelines:
           traces/phoenix:

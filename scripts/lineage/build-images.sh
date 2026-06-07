@@ -2,9 +2,12 @@
 # ============================================================================
 # BUILD LINEAGE IMAGES
 # ============================================================================
-# Builds the two Docker images required for the lineage stack:
+# Builds all Docker images required for the lineage stack:
 #   localhost/authbridge:lineage-plugin  — authbridge proxy with lineage plugin
 #   localhost/lineage-service:latest     — data lineage REST service
+#   localhost/weather-tool:lineage       — weather MCP tool (wttr.in backend)
+#   localhost/kagenti-backend:lineage    — kagenti backend (lineage API + DELETE routes)
+#   localhost/kagenti-ui:lineage         — kagenti UI (Execution Flow + Phoenix link)
 #
 # Run from the kagenti repo root. The sibling repos must already be cloned:
 #
@@ -12,10 +15,11 @@
 #   git clone -b lineage_plugin git@github.com:s-and-p-team/kagenti.git
 #   git clone -b lineage_plugin git@github.com:s-and-p-team/kagenti-extensions.git
 #   git clone -b lineage_plugin git@github.com:s-and-p-team/data_lineage.git
+#   git clone -b lineage_plugin git@github.com:s-and-p-team/agent-examples.git
 #
 # Usage
 # -----
-#   scripts/lineage/build-images.sh            # build both images
+#   scripts/lineage/build-images.sh            # build all images
 #   scripts/lineage/build-images.sh --help
 # ============================================================================
 set -euo pipefail
@@ -38,11 +42,13 @@ fi
 
 EXTENSIONS_DIR="$(cd "$REPO_ROOT/../kagenti-extensions" 2>/dev/null || true; pwd)"
 DATA_LINEAGE_DIR="$(cd "$REPO_ROOT/../data_lineage" 2>/dev/null || true; pwd)"
+AGENT_EXAMPLES_DIR="$(cd "$REPO_ROOT/../agent-examples" 2>/dev/null || true; pwd)"
 
 # ── Verify sibling repos exist ────────────────────────────────────────────────
 missing=()
 [[ -d "$REPO_ROOT/../kagenti-extensions/.git" ]] || missing+=("kagenti-extensions")
 [[ -d "$REPO_ROOT/../data_lineage/.git" ]] || missing+=("data_lineage")
+[[ -d "$REPO_ROOT/../agent-examples/.git" ]] || missing+=("agent-examples")
 
 if [[ ${#missing[@]} -gt 0 ]]; then
     log_error "Missing sibling repositories: ${missing[*]}"
@@ -50,7 +56,8 @@ if [[ ${#missing[@]} -gt 0 ]]; then
     echo "Clone them next to kagenti/ on the lineage_plugin branch:"
     echo ""
     for repo in "${missing[@]}"; do
-        echo "  git clone -b lineage_plugin git@github.com:s-and-p-team/${repo}.git"
+        echo "  git clone -b lineage_plugin git@github.com:s-and-p-team/${repo}.git 2>/dev/null || \\"
+        echo "    git clone git@github.com:kagenti/agent-examples.git  # (use main branch for agent-examples)"
     done
     echo ""
     exit 1
@@ -58,6 +65,7 @@ fi
 
 EXTENSIONS_DIR="$REPO_ROOT/../kagenti-extensions"
 DATA_LINEAGE_DIR="$REPO_ROOT/../data_lineage"
+AGENT_EXAMPLES_DIR="$REPO_ROOT/../agent-examples"
 
 # ── Warn if sibling repos are on unexpected branches ─────────────────────────
 for repo_path in "$EXTENSIONS_DIR" "$DATA_LINEAGE_DIR"; do
@@ -69,7 +77,7 @@ for repo_path in "$EXTENSIONS_DIR" "$DATA_LINEAGE_DIR"; do
 done
 
 # ── Build authbridge image ────────────────────────────────────────────────────
-log_phase "Build 1/2: authbridge (lineage plugin)"
+log_phase "Build 1/5: authbridge (lineage plugin)"
 
 AUTHBRIDGE_CTX="$EXTENSIONS_DIR/authbridge"
 log_info "Build context: $AUTHBRIDGE_CTX"
@@ -83,7 +91,7 @@ docker build \
 log_success "localhost/authbridge:lineage-plugin built"
 
 # ── Build lineage-service image ───────────────────────────────────────────────
-log_phase "Build 2/2: lineage-service"
+log_phase "Build 2/5: lineage-service"
 
 LINEAGE_SVC_CTX="$DATA_LINEAGE_DIR/lineage_service"
 log_info "Build context: $LINEAGE_SVC_CTX"
@@ -95,10 +103,48 @@ docker build \
 
 log_success "localhost/lineage-service:latest built"
 
+# ── Build weather-tool image ──────────────────────────────────────────────────
+log_phase "Build 3/5: weather-tool (wttr.in backend)"
+
+WEATHER_TOOL_CTX="$AGENT_EXAMPLES_DIR/mcp/weather_tool"
+log_info "Build context: $WEATHER_TOOL_CTX"
+log_info "Image: localhost/weather-tool:lineage"
+
+docker build \
+    -t localhost/weather-tool:lineage \
+    "$WEATHER_TOOL_CTX"
+
+log_success "localhost/weather-tool:lineage built"
+
+# ── Build kagenti-backend image ───────────────────────────────────────────────
+log_phase "Build 4/5: kagenti-backend (lineage DELETE routes)"
+
+log_info "Build context: $REPO_ROOT/kagenti"
+log_info "Image: localhost/kagenti-backend:lineage"
+
+docker build \
+    -f "$REPO_ROOT/kagenti/backend/Dockerfile" \
+    -t localhost/kagenti-backend:lineage \
+    "$REPO_ROOT/kagenti"
+
+log_success "localhost/kagenti-backend:lineage built"
+
+# ── Build kagenti-ui image ────────────────────────────────────────────────────
+log_phase "Build 5/5: kagenti-ui (Execution Flow + Phoenix link)"
+
+log_info "Build context: $REPO_ROOT/kagenti"
+log_info "Image: localhost/kagenti-ui:lineage"
+
+docker build \
+    -f "$REPO_ROOT/kagenti/ui-v2/Dockerfile" \
+    -t localhost/kagenti-ui:lineage \
+    "$REPO_ROOT/kagenti"
+
+log_success "localhost/kagenti-ui:lineage built"
+
 echo ""
-echo -e "${GREEN}${BOLD}Both images built successfully.${NC}"
+echo -e "${GREEN}${BOLD}All 5 images built successfully.${NC}"
 echo ""
 echo "Next step:"
 echo "  scripts/lineage/deploy-lineage.sh"
-echo "  scripts/lineage/deploy-lineage.sh --skip-platform   # if cluster is already up"
 echo ""

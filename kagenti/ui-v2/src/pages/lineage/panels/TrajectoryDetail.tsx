@@ -32,6 +32,7 @@ import '@xyflow/react/dist/style.css';
 import { useQuery } from '@tanstack/react-query';
 
 import { lineageService } from '@/services/lineageService';
+import { configService } from '@/services';
 import type { Hop, Run } from '../types';
 
 // ─── Color constants ─────────────────────────────────────────────────────────
@@ -221,7 +222,7 @@ const ATTR_GROUPS: [string, string[]][] = [
 ];
 const GROUPED_KEYS = new Set(ATTR_GROUPS.flatMap(([, ks]) => ks));
 
-function HopDetailContent({ hop }: { hop: Hop }) {
+function HopDetailContent({ hop, traceId, phoenixUrl }: { hop: Hop; traceId?: string; phoenixUrl?: string }) {
   const attrs = hop.attrs ?? {};
   return (
     <>
@@ -266,12 +267,24 @@ function HopDetailContent({ hop }: { hop: Hop }) {
             </div>
           );
         })()}
+        {phoenixUrl && traceId && hop.hop_kind === 'agent_to_llm' && (
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #e8e8e8' }}>
+            <a
+              href={`${phoenixUrl.replace(/\/$/, '')}/projects/default/traces/${traceId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 12, color: '#1976d2', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              🔍 View prompt &amp; completion in Phoenix →
+            </a>
+          </div>
+        )}
       </div>
     </>
   );
 }
 
-function HopDetailPanel({ hop, onClose }: { hop: Hop; onClose: () => void }) {
+function HopDetailPanel({ hop, onClose, traceId, phoenixUrl }: { hop: Hop; onClose: () => void; traceId?: string; phoenixUrl?: string }) {
   return (
     <div style={{ width: 380, flexShrink: 0, overflowY: 'auto', background: '#ffffff', border: '1px solid #d2d2d2', borderRadius: 8, padding: 16, fontSize: 13, color: '#222' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
@@ -280,12 +293,12 @@ function HopDetailPanel({ hop, onClose }: { hop: Hop; onClose: () => void }) {
         </span>
         <Button variant="plain" onClick={onClose} style={{ minWidth: 'auto', padding: '0 4px', color: '#555', fontSize: 16 }}>×</Button>
       </div>
-      <HopDetailContent hop={hop} />
+      <HopDetailContent hop={hop} traceId={traceId} phoenixUrl={phoenixUrl} />
     </div>
   );
 }
 
-function EdgeHopsPanel({ hops, onClose }: { hops: Hop[]; onClose: () => void }) {
+function EdgeHopsPanel({ hops, onClose, traceId, phoenixUrl }: { hops: Hop[]; onClose: () => void; traceId?: string; phoenixUrl?: string }) {
   const [activeTab, setActiveTab] = useState(0);
   const hop = hops[Math.min(activeTab, hops.length - 1)];
   return (
@@ -321,7 +334,7 @@ function EdgeHopsPanel({ hops, onClose }: { hops: Hop[]; onClose: () => void }) 
           ))}
         </div>
       )}
-      <HopDetailContent hop={hop} />
+      <HopDetailContent hop={hop} traceId={traceId} phoenixUrl={phoenixUrl} />
     </div>
   );
 }
@@ -367,9 +380,9 @@ type SelectedItem =
   | { kind: 'edge'; hops: Hop[] }
   | { kind: 'node'; nodeId: string; nodeType: string; hops: Hop[] };
 
-function DetailPanel({ item, onClose, onSelectHop }: { item: SelectedItem; onClose: () => void; onSelectHop: (h: Hop) => void }) {
-  if (item.kind === 'hop')  return <HopDetailPanel hop={item.hop} onClose={onClose} />;
-  if (item.kind === 'edge') return <EdgeHopsPanel hops={item.hops} onClose={onClose} />;
+function DetailPanel({ item, onClose, onSelectHop, traceId, phoenixUrl }: { item: SelectedItem; onClose: () => void; onSelectHop: (h: Hop) => void; traceId?: string; phoenixUrl?: string }) {
+  if (item.kind === 'hop')  return <HopDetailPanel hop={item.hop} onClose={onClose} traceId={traceId} phoenixUrl={phoenixUrl} />;
+  if (item.kind === 'edge') return <EdgeHopsPanel hops={item.hops} onClose={onClose} traceId={traceId} phoenixUrl={phoenixUrl} />;
   return <NodeHopsPanel nodeId={item.nodeId} nodeType={item.nodeType} hops={item.hops} onClose={onClose} onSelectHop={onSelectHop} />;
 }
 
@@ -659,6 +672,13 @@ export const TrajectoryDetail: React.FC<Props> = ({ run, onBack }) => {
     staleTime: 30_000,
   });
 
+  const { data: dashboards } = useQuery({
+    queryKey: ['dashboards'],
+    queryFn: () => configService.getDashboards(),
+    staleTime: 300_000,
+  });
+  const phoenixUrl = dashboards?.traces || '';
+
   const handleSelect    = useCallback((item: SelectedItem) => setSelected(item), []);
   const handleSelectHop = useCallback((hop: Hop) => setSelected({ kind: 'hop', hop }), []);
   const handleClose     = useCallback(() => setSelected(null), []);
@@ -700,7 +720,7 @@ export const TrajectoryDetail: React.FC<Props> = ({ run, onBack }) => {
             )}
           </div>
           {selected && (
-            <DetailPanel item={selected} onClose={handleClose} onSelectHop={handleSelectHop} />
+            <DetailPanel item={selected} onClose={handleClose} onSelectHop={handleSelectHop} traceId={run.trace_id} phoenixUrl={phoenixUrl} />
           )}
         </div>
       )}

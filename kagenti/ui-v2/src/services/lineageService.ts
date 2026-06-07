@@ -4,14 +4,16 @@
 import { apiFetch } from './api';
 import type { CommonEdge, Hop, PrincipalAgents, PrincipalPath, Run, TimeRange } from '../pages/lineage/types';
 
-// Raw shape returned by the backend (uses caller_id, not source_id)
+// Raw shape returned by the backend — new API uses source_id, old used caller_id
 interface ApiHop extends Omit<Hop, 'source_id'> {
-  caller_id: string | null;
+  source_id?: string | null;
+  caller_id?: string | null;
 }
 
 function normalizeHop(h: ApiHop): Hop {
   const attrs = h.attrs ?? {};
   const sourceId =
+    h.source_id ??
     h.caller_id ??
     (attrs['trust.source_id'] as string | undefined) ??
     (attrs['lineage.source.id'] as string | undefined) ??

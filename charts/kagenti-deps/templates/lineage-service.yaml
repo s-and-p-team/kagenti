@@ -121,7 +121,7 @@ data:
         run_id         UUID        NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
         span_id        TEXT        UNIQUE NOT NULL,
         parent_span_id TEXT,
-        caller_id      TEXT,
+        source_id      TEXT,
         target_id      TEXT        NOT NULL,
         hop_kind       TEXT        NOT NULL,
         started_at     TIMESTAMPTZ NOT NULL,
@@ -130,14 +130,14 @@ data:
     );
 
     CREATE TABLE IF NOT EXISTS edges (
-        caller_id    TEXT        NOT NULL,
+        source_id    TEXT        NOT NULL,
         target_id    TEXT        NOT NULL,
         hop_kind     TEXT        NOT NULL,
         principal_id TEXT        NOT NULL,
         first_seen   TIMESTAMPTZ NOT NULL,
         last_seen    TIMESTAMPTZ NOT NULL,
         count        BIGINT      NOT NULL DEFAULT 1,
-        PRIMARY KEY (caller_id, target_id, hop_kind, principal_id)
+        PRIMARY KEY (source_id, target_id, hop_kind, principal_id)
     );
 
     CREATE INDEX IF NOT EXISTS hops_run_id_started_idx    ON hops(run_id, started_at);

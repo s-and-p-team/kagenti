@@ -375,6 +375,7 @@ data:
           - name: lineage-telemetry
             config:
               otel_endpoint: {{ $root.Values.authBridge.lineage.otelEndpoint | quote }}
+              capture_io: {{ $root.Values.authBridge.lineage.captureIO }}
           {{- end }}
       outbound:
         plugins:
@@ -401,6 +402,7 @@ data:
           - name: lineage-telemetry
             config:
               otel_endpoint: {{ $root.Values.authBridge.lineage.otelEndpoint | quote }}
+              capture_io: {{ $root.Values.authBridge.lineage.captureIO }}
           {{- end }}
 ---
 {{- if $.Values.openshift }}

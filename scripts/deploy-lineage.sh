@@ -20,6 +20,7 @@
 # Usage
 # -----
 #   scripts/deploy-lineage.sh                   # deploy only
+#   scripts/deploy-lineage.sh --phoenix         # deploy + Phoenix (http://phoenix.localtest.me:8080)
 #   scripts/deploy-lineage.sh --demo-agents     # deploy + weather agents
 #   scripts/deploy-lineage.sh --demo-agents --test  # deploy + agents + E2E tests
 #   scripts/deploy-lineage.sh --test            # E2E tests only (no re-deploy)
@@ -27,6 +28,7 @@
 #   scripts/deploy-lineage.sh --cluster-name my-cluster
 #
 # Options
+#   --phoenix          Enable Phoenix and expose at http://phoenix.localtest.me:8080
 #   --demo-agents      Deploy weather-service (A2A) and weather-tool (MCP)
 #                      into team1 namespace (required for E2E tests)
 #   --test             Run lineage E2E tests after deployment
@@ -66,6 +68,7 @@ DO_AGENTS=false
 DO_TEST=false
 DRY_RUN=false
 SKIP_BUILD=false
+PHOENIX=false
 
 # ── Interrupt handling ────────────────────────────────────────────────────────
 cleanup() {
@@ -81,6 +84,7 @@ trap cleanup SIGINT SIGTERM
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --phoenix)       PHOENIX=true; shift ;;
         --demo-agents)   DO_AGENTS=true; shift ;;
         --test)          DO_TEST=true; DO_AGENTS=true; shift ;;
         --skip-deploy)   DO_DEPLOY=false; shift ;;
@@ -185,6 +189,9 @@ if $DO_DEPLOY; then
     # the nested path would not reach the chart. Use --set flags instead.
     log_step "Upgrading kagenti-deps (lineageService + OTel pipeline)..."
 
+    _DEPS_PHOENIX_FLAG=""
+    $PHOENIX && _DEPS_PHOENIX_FLAG="--set components.phoenix.enabled=true"
+
     run_cmd helm upgrade kagenti-deps "$REPO_ROOT/charts/kagenti-deps/" \
         -n kagenti-system \
         --reuse-values \
@@ -192,6 +199,7 @@ if $DO_DEPLOY; then
         --set "lineageService.image.repository=${LINEAGE_IMAGE}" \
         --set "lineageService.image.tag=${LINEAGE_IMAGE_TAG}" \
         --set "lineageService.image.pullPolicy=${LINEAGE_IMAGE_PULL_POLICY}" \
+        ${_DEPS_PHOENIX_FLAG} \
         --wait --timeout 15m
 
     log_success "kagenti-deps upgraded"
@@ -216,11 +224,15 @@ if $DO_DEPLOY; then
     # ── 1b. kagenti: enable lineage feature flag ──────────────────────────────
     log_step "Upgrading kagenti (lineage feature flag + authbridge plugin)..."
 
+    _KAGENTI_PHOENIX_FLAG=""
+    $PHOENIX && _KAGENTI_PHOENIX_FLAG="--set components.phoenix.enabled=true"
+
     run_cmd helm upgrade kagenti "$REPO_ROOT/charts/kagenti/" \
         -n kagenti-system \
         --reuse-values \
         --set featureFlags.lineage=true \
         --set "authBridge.lineage.otelEndpoint=${OTEL_ENDPOINT}" \
+        ${_KAGENTI_PHOENIX_FLAG} \
         --wait --timeout 15m
 
     log_success "kagenti upgraded"
@@ -242,6 +254,18 @@ if $DO_DEPLOY; then
     run_cmd kubectl rollout status deployment/kagenti-backend -n kagenti-system \
         --timeout=120s 2>/dev/null || log_warn "kagenti-backend rollout status timed out (non-fatal)"
     log_success "kagenti-backend restarted"
+
+    # ── 1e. Wait for Phoenix (if requested) ──────────────────────────────────
+    if $PHOENIX; then
+        log_step "Waiting for Phoenix deployment to be ready..."
+        run_cmd kubectl rollout status deployment/phoenix \
+            -n kagenti-system --timeout=180s || {
+            log_error "Phoenix did not become ready within 3 minutes."
+            kubectl describe pods -n kagenti-system -l app=phoenix 2>/dev/null | tail -20 || true
+            exit 1
+        }
+        log_success "Phoenix is ready"
+    fi
 
     log_phase "PHASE 1: Complete"
     echo ""
@@ -397,6 +421,9 @@ echo ""
 echo "  Lineage UI:     http://kagenti-ui.${DOMAIN}:8080  → Data Lineage tab"
 echo "  Backend API:    http://localhost:8002/api/v1/lineage/runs  (port-forward)"
 echo "  Lineage svc:    kubectl port-forward -n kagenti-system svc/lineage-service 8001:8000"
+if $PHOENIX; then
+    echo "  Phoenix UI:     http://phoenix.${DOMAIN}:8080"
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Open the Lineage UI tab and send a weather query"

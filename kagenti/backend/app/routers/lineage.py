@@ -45,6 +45,22 @@ async def _proxy_get(path: str, params: dict | None = None) -> Any:
         raise HTTPException(status_code=502, detail="Lineage service unavailable") from exc
 
 
+async def _proxy_delete(path: str, params: dict | None = None) -> Any:
+    url = f"{_lineage_url()}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.delete(url, params=params)
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="Not found")
+        resp.raise_for_status()
+        return resp.json() if resp.content else None
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Lineage service error: %s", exc)
+        raise HTTPException(status_code=502, detail="Lineage service unavailable") from exc
+
+
 @router.get("/runs", dependencies=[_viewer])
 async def list_runs(
     principal: Optional[str] = Query(None),
@@ -69,6 +85,18 @@ async def list_runs(
     if until:
         params["until"] = until
     return await _proxy_get("/runs", params)
+
+
+@router.delete("/runs", dependencies=[_viewer])
+async def delete_all_runs(confirm: bool = Query(False)):
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Pass confirm=true to delete all runs")
+    return await _proxy_delete("/runs", {"confirm": "true"})
+
+
+@router.delete("/runs/{run_id}", dependencies=[_viewer])
+async def delete_run(run_id: str):
+    return await _proxy_delete(f"/runs/{run_id}")
 
 
 @router.get("/runs/{run_id}/trajectory", dependencies=[_viewer])

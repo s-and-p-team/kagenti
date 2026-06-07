@@ -84,6 +84,7 @@ data:
           - name: lineage-telemetry
             config:
               otel_endpoint: {{ .Values.authBridge.lineage.otelEndpoint | quote }}
+              capture_io: {{ .Values.authBridge.lineage.captureIO }}
           {{- end }}
       outbound:
         plugins:
@@ -107,6 +108,7 @@ data:
           - name: lineage-telemetry
             config:
               otel_endpoint: {{ .Values.authBridge.lineage.otelEndpoint | quote }}
+              capture_io: {{ .Values.authBridge.lineage.captureIO }}
           {{- end }}
 ---
 apiVersion: v1

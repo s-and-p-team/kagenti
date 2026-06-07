@@ -211,6 +211,9 @@ authBridge:
   lineage:
     # OTLP gRPC endpoint for the lineage-telemetry plugin (http:// prefix is stripped)
     otelEndpoint: "http://otel-collector.kagenti-system.svc.cluster.local:4317"
+    # captureIO attaches parsed request/response content as input.value / output.value
+    # on lineage spans, making prompt/completion visible in Phoenix and Execution Flow.
+    captureIO: true
 
 # ------------------------------------------------------------------
 #  SPIFFE Identity Provider Setup Job Configuration
