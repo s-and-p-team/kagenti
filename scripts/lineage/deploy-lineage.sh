@@ -245,7 +245,7 @@ log_success "kagenti-backend restarted"
 if $PHOENIX; then
     log_phase "STEP 8: Wait for Phoenix"
 
-    run_cmd kubectl rollout status deployment/phoenix \
+    run_cmd kubectl rollout status statefulset/phoenix \
         -n kagenti-system --timeout=180s || {
         log_error "Phoenix did not become ready within 3 minutes."
         kubectl describe pods -n kagenti-system -l app=phoenix 2>/dev/null | tail -20 || true
