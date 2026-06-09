@@ -491,20 +491,16 @@ function SequenceView({ hops, onSelect }: { hops: Hop[]; onSelect: (item: Select
   const nodeTypes = useMemo(() => classifyNodes(visibleHops), [visibleHops]);
 
   const entities = useMemo(() => {
-    const order: Record<string, number> = { source: 0, agent: 1, llm: 2, tool: 3 };
+    // Order strictly by first appearance in the time-sorted hop list so the
+    // sequence diagram reads left-to-right in call order (trip-demo first,
+    // then travel-advisor, then the agents it calls, etc.).
     const seen = new Map<string, number>();
     visibleHops.forEach((h, i) => {
       if (h.source_id && !seen.has(h.source_id)) seen.set(h.source_id, i);
       if (!seen.has(h.target_id)) seen.set(h.target_id, i);
     });
-    return [...seen.keys()].sort((a, b) => {
-      const ta = nodeTypes.get(a) ?? 'agent';
-      const tb = nodeTypes.get(b) ?? 'agent';
-      return order[ta] !== order[tb]
-        ? order[ta] - order[tb]
-        : (seen.get(a) ?? 0) - (seen.get(b) ?? 0);
-    });
-  }, [visibleHops, nodeTypes]);
+    return [...seen.keys()].sort((a, b) => (seen.get(a) ?? 0) - (seen.get(b) ?? 0));
+  }, [visibleHops]);
 
   const entityX = useMemo(() => {
     const m = new Map<string, number>();
