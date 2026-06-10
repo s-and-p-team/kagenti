@@ -491,15 +491,53 @@ function SequenceView({ hops, onSelect }: { hops: Hop[]; onSelect: (item: Select
   const nodeTypes = useMemo(() => classifyNodes(visibleHops), [visibleHops]);
 
   const entities = useMemo(() => {
-    // Order strictly by first appearance in the time-sorted hop list so the
-    // sequence diagram reads left-to-right in call order (trip-demo first,
-    // then travel-advisor, then the agents it calls, etc.).
+    // Build entity order from the call graph using BFS from the chain initiator,
+    // so the sequence diagram reads left-to-right in call order regardless of
+    // timestamp precision. Non-agent entities (LLMs, tools) are appended in
+    // first-appearance order after all agent swimlanes.
+    const agentKinds = new Set(['principal_to_agent', 'agent_to_agent']);
+    const callsOut  = new Map<string, string[]>();
+    const calledBy  = new Set<string>();
+
+    for (const h of visibleHops) {
+      if (!agentKinds.has(h.hop_kind) || !h.source_id) continue;
+      callsOut.set(h.source_id, [...(callsOut.get(h.source_id) ?? []), h.target_id]);
+      calledBy.add(h.target_id);
+    }
+
+    // Initiators: appear as A2A source but never as A2A target → start of chain
+    const initiators = [...callsOut.keys()].filter(e => !calledBy.has(e));
+
+    // BFS to order agents in call sequence
+    const ordered: string[] = [];
+    const visited = new Set<string>();
+    const queue = [...initiators];
+    while (queue.length) {
+      const e = queue.shift()!;
+      if (visited.has(e)) continue;
+      visited.add(e);
+      ordered.push(e);
+      for (const next of (callsOut.get(e) ?? [])) {
+        if (!visited.has(next)) queue.push(next);
+      }
+    }
+
+    // Append any A2A targets not yet visited (agents only reached as targets)
+    for (const e of calledBy) {
+      if (!visited.has(e)) { visited.add(e); ordered.push(e); }
+    }
+
+    // Append non-agent entities (LLMs, tools) in first-appearance order
     const seen = new Map<string, number>();
     visibleHops.forEach((h, i) => {
       if (h.source_id && !seen.has(h.source_id)) seen.set(h.source_id, i);
       if (!seen.has(h.target_id)) seen.set(h.target_id, i);
     });
-    return [...seen.keys()].sort((a, b) => (seen.get(a) ?? 0) - (seen.get(b) ?? 0));
+    const rest = [...seen.keys()]
+      .filter(e => !visited.has(e))
+      .sort((a, b) => (seen.get(a) ?? 999) - (seen.get(b) ?? 999));
+
+    return [...ordered, ...rest];
   }, [visibleHops]);
 
   const entityX = useMemo(() => {
