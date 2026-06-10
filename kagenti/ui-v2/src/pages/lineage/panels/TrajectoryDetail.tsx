@@ -548,10 +548,22 @@ function SequenceView({ hops, onSelect }: { hops: Hop[]; onSelect: (item: Select
 
   const events = useMemo((): SeqEvent[] => {
     const evts: SeqEvent[] = [];
+    // Compute max end-time across all non-principal hops so principal_to_agent
+    // response arrows always sort last: the chain initiator's "return" only
+    // makes sense after all sub-calls have completed.
+    let maxEnd = 0;
+    for (const h of visibleHops) {
+      if (h.hop_kind !== 'principal_to_agent') {
+        maxEnd = Math.max(maxEnd, new Date(h.started_at).getTime() + (h.duration_ms ?? 0));
+      }
+    }
     for (const h of visibleHops) {
       const t = new Date(h.started_at).getTime();
       evts.push({ kind: 'request',  hop: h, time: t });
-      evts.push({ kind: 'response', hop: h, time: t + (h.duration_ms ?? 0) });
+      const endTime = h.hop_kind === 'principal_to_agent'
+        ? Math.max(t + (h.duration_ms ?? 0), maxEnd + 1)
+        : t + (h.duration_ms ?? 0);
+      evts.push({ kind: 'response', hop: h, time: endTime });
     }
     return evts.sort((a, b) => a.time - b.time || (a.kind === 'request' ? -1 : 1));
   }, [visibleHops]);
