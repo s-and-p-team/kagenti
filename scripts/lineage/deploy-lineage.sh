@@ -179,6 +179,14 @@ run_cmd helm upgrade kagenti-deps "$REPO_ROOT/charts/kagenti-deps/" \
 
 log_success "kagenti-deps chart upgraded"
 
+# OTel Collector does not hot-reload ConfigMaps — restart it so the lineage
+# pipeline (filter/lineage + transform/lineage_to_trust + otlphttp/lineage)
+# takes effect.
+log_phase "STEP 3b: Restart OTel Collector (pick up lineage pipeline config)"
+run_cmd kubectl rollout restart deployment/otel-collector -n kagenti-system
+run_cmd kubectl rollout status deployment/otel-collector -n kagenti-system --timeout=60s
+log_success "otel-collector restarted"
+
 # ── Step 4: Restart team1 so agents pick up the new authbridge sidecar ───────
 log_phase "STEP 4: Restart agent pods (pick up new authbridge sidecar)"
 

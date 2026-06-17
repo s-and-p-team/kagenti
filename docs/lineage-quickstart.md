@@ -50,6 +50,7 @@ Ollama must be running and reachable on `localhost:11434` before step c.
 Pull the model once if you haven't already:
 ```bash
 ollama pull qwen2.5:3b
+ollama pull qwen2.5:7b
 ```
 
 ---
