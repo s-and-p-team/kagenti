@@ -74,6 +74,7 @@ const FLAG_LABELS: Record<DisplayedFlag, string> = {
   agentSandbox: 'Agent Sandbox',
   skills: 'Skills',
   authbridgeAPI: 'AuthBridge API',
+  lineage: 'Data Governance',
 };
 
 const PlatformStatusCard: React.FC = () => {

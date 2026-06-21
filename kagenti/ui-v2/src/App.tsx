@@ -35,6 +35,7 @@ import { SandboxesPage } from './pages/SandboxesPage';
 import { SessionsTablePage } from './pages/SessionsTablePage';
 import { SessionGraphPage } from './pages/SessionGraphPage';
 import { TriggerManagementPage } from './pages/TriggerManagementPage';
+import { LineagePage } from './pages/lineage/LineagePage';
 
 function App() {
   const features = useFeatureFlags();
@@ -44,6 +45,18 @@ function App() {
       <Routes>
         {/* Public route - accessible to everyone */}
         <Route path="/" element={<HomePage />} />
+
+        {/* Data Lineage (feature-flagged) — consumes the data-governance pod */}
+        {features.lineage && (
+          <Route
+            path="/lineage"
+            element={
+              <ProtectedRoute>
+                <LineagePage />
+              </ProtectedRoute>
+            }
+          />
+        )}
         
         {/* Protected routes - require authentication */}
         <Route

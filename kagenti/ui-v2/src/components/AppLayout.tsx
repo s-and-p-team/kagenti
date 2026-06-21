@@ -436,6 +436,15 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children, features }) => {
                   >
                     Observability
                   </NavItem>
+                  {features?.lineage && (
+                    <NavItem
+                      itemId="lineage"
+                      isActive={isNavItemActive('/lineage')}
+                      onClick={() => handleNavSelect('/lineage')}
+                    >
+                      Data Governance
+                    </NavItem>
+                  )}
                   <NavItem
                     itemId="admin"
                     isActive={isNavItemActive('/admin')}

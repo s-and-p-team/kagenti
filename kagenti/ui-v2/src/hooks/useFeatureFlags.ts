@@ -17,6 +17,8 @@ export interface FeatureFlags {
   authbridgeAPI: boolean;
   /** Platform Status card and /platform-status endpoint */
   admin: boolean;
+  /** Data Lineage / trust provenance UI (served by the data-governance pod). */
+  lineage: boolean;
 }
 
 const DEFAULT_FLAGS: FeatureFlags = {
@@ -28,6 +30,7 @@ const DEFAULT_FLAGS: FeatureFlags = {
   skills: false,
   authbridgeAPI: false,
   admin: false,
+  lineage: false,
 };
 
 let cachedFlags: FeatureFlags | null = null;
@@ -50,6 +53,7 @@ export function useFeatureFlags(): FeatureFlags {
           skills: data.skills === true,
           authbridgeAPI: data.authbridgeAPI === true,
           admin: data.admin === true,
+          lineage: data.lineage === true,
           };
         cachedFlags = validated;
         setFlags(validated);

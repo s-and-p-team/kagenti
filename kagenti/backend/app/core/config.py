@@ -80,11 +80,19 @@ class Settings(BaseSettings):
     kagenti_feature_flag_sidecars: bool = (
         False  # sidecar agents (looper, hallucination, context guardian)
     )
+    kagenti_feature_flag_lineage: bool = False  # Data Lineage / trust provenance UI
 
     # Label settings
     kagenti_label_prefix: str = "kagenti.io/"
     enabled_namespace_label_key: str = "kagenti-enabled"
     enabled_namespace_label_value: str = "true"
+
+    # Lineage REST contract base. Repointed from arielf's standalone
+    # lineage_service to the data-governance pod, which serves the identical
+    # /runs, /runs/{id}/trajectory, /edges/common, /paths shapes under /lineage.
+    lineage_service_url: str = (
+        "http://data-governance-ui.data-governance.svc.cluster.local:8080/lineage"
+    )
 
     # External service URLs (read from ConfigMap via environment variables)
     traces_dashboard_url: str = ""
